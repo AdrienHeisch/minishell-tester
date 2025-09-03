@@ -5,11 +5,7 @@ use clap::Parser;
 use colored::Colorize;
 use exec::{exec_test, ExecError};
 use parse::{parse_tests, ParseTestError};
-use std::{
-    env, fs, io,
-    num::ParseIntError,
-    path::{Path, PathBuf},
-};
+use std::{env, fs, io, path::PathBuf};
 use thiserror::Error;
 
 const TMP_DIR: &str = "tmp";
@@ -30,16 +26,28 @@ enum Level {
 
 #[derive(Parser)]
 struct Cli {
+    /// Levels are in order here on the right, higher levels will still run lower level tests
     #[arg(short, long, default_value = "mandatory")]
     level: Level,
+    /// Use this to skip tests
     #[arg(short, long, default_value = "0")]
     start: usize,
+    /// Path to minishell executable
     #[arg(short, long, default_value = "../minishell")]
     program: PathBuf,
-    #[arg(long, default_value = "bash")]
+    /// Path to bash executable
+    #[arg(long, default_value = "/usr/bin/bash")]
     bash: PathBuf,
+    /// Run bash as bash --posix
+    #[arg(long)]
+    bash_posix: bool,
+    /// Will not clear some readonly variables in bash -> list with "env -i bash -c set"
+    #[arg(long)]
+    no_env: bool,
+    /// Path to tests csv file
     #[arg(short, long, default_value = "tests.csv")]
     tests: PathBuf,
+    /// Path to blacklist file, should contain test ids to be ignored, each followed by a line break
     #[arg(short, long, default_value = DEFAULT_BLACKLIST_PATH)]
     blacklist: PathBuf,
 }
@@ -53,42 +61,19 @@ enum Error {
     SetCurrentDir(io::Error),
     #[error("Failed to clear current directory: {0}")]
     ClearCurrentDir(io::Error),
-    Blacklist(#[from] BlacklistError),
     ParseTest(#[from] ParseTestError),
     ExecTest(#[from] ExecError),
 }
 
-#[derive(Debug, Error)]
-enum BlacklistError {
-    #[error("Failed to parse blacklist: {0}")]
-    Parse(#[from] ParseIntError),
-    #[error("Failed to read blacklist file: {0}")]
-    Io(#[from] io::Error),
-}
-
-fn read_blacklist(path: &Path) -> Result<Vec<usize>, BlacklistError> {
-    match fs::read_to_string(path) {
-        Ok(blacklist) => blacklist
-            .split('\n')
-            .take_while(|id| !id.is_empty())
-            .map(|id| id.parse::<usize>().map_err(Into::into))
-            .collect(),
-        Err(_) if path.as_os_str() == DEFAULT_BLACKLIST_PATH => Ok(vec![]),
-        Err(err) => Err(err.into()),
-    }
-}
-
 fn run_tests(cli: &Cli) -> Result<(), Error> {
     let path = env::current_dir().map_err(Error::CurrentDir)?;
-    let blacklist = read_blacklist(&cli.blacklist)?;
     let tests_path = path.join(&cli.tests);
-    let program_path = path.join(&cli.program);
-    let bash_path = &cli.bash;
+    let (tests, n_ignored_tests) = parse_tests(&tests_path, cli)?;
+
     fs::create_dir(path.join(TMP_DIR)).ok();
     env::set_current_dir(path.join(TMP_DIR)).map_err(Error::SetCurrentDir)?;
-    let (tests, n_ignored_tests) = parse_tests(&tests_path, cli, &blacklist)?;
     for test in tests.iter().skip_while(|test| test.id != cli.start) {
-        match exec_test(test, &program_path, bash_path) {
+        match exec_test(test, cli, &path) {
             Ok((message, success)) => {
                 if success {
                     println!("{}", message.green());
@@ -110,6 +95,7 @@ fn run_tests(cli: &Cli) -> Result<(), Error> {
         println!("\n!!!   {n_ignored_tests} IGNORED TESTS   !!!");
     }
     fs::remove_dir_all(path.join(TMP_DIR)).map_err(Error::ClearCurrentDir)?;
+
     Ok(())
 }
 

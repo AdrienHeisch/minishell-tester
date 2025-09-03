@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::Test;
+use crate::{Cli, Test};
 use std::{
     env,
     ffi::OsStr,
@@ -16,8 +16,27 @@ fn clear_dir(dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn exec(program: impl AsRef<OsStr>, commands: &str) -> io::Result<Output> {
-    Command::new(program).args(["-c", commands]).output()
+fn clear_env(command: &mut Command) {
+    command.env_clear();
+    command.env("PATH", "");
+    command.env("TERM", "");
+    command.env("SHELL", "");
+}
+
+fn exec(
+    program: impl AsRef<OsStr>,
+    commands: &str,
+    options: &[&str],
+    no_env: bool,
+) -> io::Result<Output> {
+    let mut args = options.to_vec();
+    args.extend_from_slice(&["-c", commands]);
+    let mut command = Command::new(program);
+    command.args(args);
+    if no_env {
+        clear_env(&mut command);
+    }
+    command.output()
 }
 
 type ExecOk = (String, bool);
@@ -26,11 +45,10 @@ type ExecOk = (String, bool);
 #[error("{0}\n{1}\n######################")]
 pub struct ExecError(pub String, pub io::Error);
 
-pub fn exec_test(
-    test: &Test,
-    program_path: &Path,
-    bash_path: &Path,
-) -> Result<ExecOk, ExecError> {
+pub fn exec_test(test: &Test, cli: &Cli, base_path: &Path) -> Result<ExecOk, ExecError> {
+    let program_path = base_path.join(&cli.program);
+    let bash_path = &cli.bash;
+
     let mut msg = String::new();
     macro_rules! make_err {
         ($e:expr) => {
@@ -46,14 +64,18 @@ pub fn exec_test(
     msg += &format!("{}\n", test.commands);
 
     make_err!(clear_dir(&current_dir))?;
+    let mut bash_options = Vec::new();
+    if cli.bash_posix {
+        bash_options.push("--posix");
+    }
     let bash = make_err!(
-        exec(bash_path, &test.commands),
+        exec(bash_path, &test.commands, &bash_options, cli.no_env),
         "# BASH  FAILED TO RUN! #"
     )?;
 
     make_err!(clear_dir(&current_dir))?;
     let minishell = make_err!(
-        exec(program_path, &test.commands),
+        exec(program_path, &test.commands, &[], cli.no_env),
         "#### FAILED TO RUN! ####"
     )?;
 

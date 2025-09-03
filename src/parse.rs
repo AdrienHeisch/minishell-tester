@@ -1,9 +1,41 @@
 use thiserror::Error;
 
-use crate::{Cli, Level, Test};
-use std::{fs::File, io, path::Path};
+use crate::{Cli, Level, Test, DEFAULT_BLACKLIST_PATH};
+use std::{
+    fs::{self, File},
+    io,
+    num::ParseIntError,
+    path::Path,
+};
+
+#[derive(Debug, Error)]
+#[error("0")]
+pub enum ParseTestError {
+    Io(#[from] io::Error),
+    Blacklist(#[from] BlacklistError),
+}
+
+#[derive(Debug, Error)]
+pub enum BlacklistError {
+    #[error("Failed to parse blacklist: {0}")]
+    Parse(#[from] ParseIntError),
+    #[error("Failed to read blacklist file: {0}")]
+    Io(#[from] io::Error),
+}
 
 const BONUS_RANGES: &[std::ops::RangeInclusive<usize>] = &[549..=574, 575..=612]; //, 737..=742];
+
+fn read_blacklist(path: &Path) -> Result<Vec<usize>, BlacklistError> {
+    match fs::read_to_string(path) {
+        Ok(blacklist) => blacklist
+            .split('\n')
+            .take_while(|id| !id.is_empty())
+            .map(|id| id.parse::<usize>().map_err(Into::into))
+            .collect(),
+        Err(_) if path.as_os_str() == DEFAULT_BLACKLIST_PATH => Ok(vec![]),
+        Err(err) => Err(err.into()),
+    }
+}
 
 fn fix_commands(commands: &str) -> String {
     commands
@@ -16,15 +48,8 @@ fn fix_commands(commands: &str) -> String {
         .replace("../", "./")
 }
 
-#[derive(Debug, Error)]
-#[error("0")]
-pub struct ParseTestError(#[from] io::Error);
-
-pub fn parse_tests(
-    path: &Path,
-    cli: &Cli,
-    blacklist: &[usize],
-) -> Result<(Vec<Test>, usize), ParseTestError> {
+pub fn parse_tests(path: &Path, cli: &Cli) -> Result<(Vec<Test>, usize), ParseTestError> {
+    let blacklist = read_blacklist(&cli.blacklist)?;
     let file = File::open(path)?;
     let mut n_ignored_tests = 0;
     let mut reader = csv::Reader::from_reader(file);
