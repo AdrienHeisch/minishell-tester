@@ -15,6 +15,7 @@ const DEFAULT_TESTS_PATH: &str = "tests.csv";
 const DEFAULT_IGNORE_PATH: &str = ".testignore";
 
 #[derive(Parser)]
+/// IMPORTANT : your minishell needs to support the -c option : ./minishell -c "echo test"
 struct Cli {
     #[command(subcommand)]
     subcommand: Option<Subcommands>,
