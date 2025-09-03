@@ -3,7 +3,7 @@ mod parse;
 
 use clap::Parser;
 use colored::Colorize;
-use exec::{exec_test, ExecError, ExecOk};
+use exec::{exec_test, ExecError};
 use parse::{parse_tests, ParseTestError};
 use std::{
     env, fs, io,
@@ -36,6 +36,8 @@ struct Cli {
     start: usize,
     #[arg(short, long, default_value = "../minishell")]
     program: PathBuf,
+    #[arg(long, default_value = "bash")]
+    bash: PathBuf,
     #[arg(short, long, default_value = "tests.csv")]
     tests: PathBuf,
     #[arg(short, long, default_value = DEFAULT_BLACKLIST_PATH)]
@@ -45,26 +47,16 @@ struct Cli {
 #[derive(Debug, Error)]
 #[error("{0}")]
 enum Error {
-    CurrentDir(#[from] CurrentDirError),
-    SetCurrentDir(#[from] SetCurrentDirError),
-    ClearCurrentDir(#[from] ClearCurrentDirError),
+    #[error("Failed to get current directory: {0}")]
+    CurrentDir(io::Error),
+    #[error("Failed to set current directory: {0}")]
+    SetCurrentDir(io::Error),
+    #[error("Failed to clear current directory: {0}")]
+    ClearCurrentDir(io::Error),
     Blacklist(#[from] BlacklistError),
     ParseTest(#[from] ParseTestError),
-    #[error("")]
     ExecTest(#[from] ExecError),
 }
-
-#[derive(Debug, Error)]
-#[error("Failed to get current directory: {0}")]
-struct CurrentDirError(#[from] io::Error);
-
-#[derive(Debug, Error)]
-#[error("Failed to set current directory: {0}")]
-struct SetCurrentDirError(#[from] io::Error);
-
-#[derive(Debug, Error)]
-#[error("Failed to clear current directory: {0}")]
-struct ClearCurrentDirError(#[from] io::Error);
 
 #[derive(Debug, Error)]
 enum BlacklistError {
@@ -87,16 +79,17 @@ fn read_blacklist(path: &Path) -> Result<Vec<usize>, BlacklistError> {
 }
 
 fn run_tests(cli: &Cli) -> Result<(), Error> {
-    let path = env::current_dir().map_err(CurrentDirError)?;
+    let path = env::current_dir().map_err(Error::CurrentDir)?;
     let blacklist = read_blacklist(&cli.blacklist)?;
     let tests_path = path.join(&cli.tests);
     let program_path = path.join(&cli.program);
+    let bash_path = &cli.bash;
     fs::create_dir(path.join(TMP_DIR)).ok();
-    env::set_current_dir(path.join(TMP_DIR)).map_err(SetCurrentDirError)?;
+    env::set_current_dir(path.join(TMP_DIR)).map_err(Error::SetCurrentDir)?;
     let (tests, n_ignored_tests) = parse_tests(&tests_path, cli, &blacklist)?;
     for test in tests.iter().skip_while(|test| test.id != cli.start) {
-        match exec_test(test, &program_path) {
-            Ok(ExecOk(message, success)) => {
+        match exec_test(test, &program_path, bash_path) {
+            Ok((message, success)) => {
                 if success {
                     println!("{}", message.green());
                 } else {
@@ -109,14 +102,14 @@ fn run_tests(cli: &Cli) -> Result<(), Error> {
                     "{}",
                     format!("{}\n{}\n######################", err.0, err.1).red()
                 );
-                return Err(Error::from(err));
+                return Ok(());
             }
         }
     }
     if n_ignored_tests > 0 {
         println!("\n!!!   {n_ignored_tests} IGNORED TESTS   !!!");
     }
-    fs::remove_dir_all(path.join(TMP_DIR)).map_err(ClearCurrentDirError)?;
+    fs::remove_dir_all(path.join(TMP_DIR)).map_err(Error::ClearCurrentDir)?;
     Ok(())
 }
 

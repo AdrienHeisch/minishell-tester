@@ -20,23 +20,43 @@ fn exec(program: impl AsRef<OsStr>, commands: &str) -> io::Result<Output> {
     Command::new(program).args(["-c", commands]).output()
 }
 
-pub struct ExecOk(pub String, pub bool);
+type ExecOk = (String, bool);
 
 #[derive(Debug, Error)]
 #[error("{0}\n{1}\n######################")]
 pub struct ExecError(pub String, pub io::Error);
 
-pub fn exec_test(test: &Test, program_path: &Path) -> Result<ExecOk, ExecError> {
+pub fn exec_test(
+    test: &Test,
+    program_path: &Path,
+    bash_path: &Path,
+) -> Result<ExecOk, ExecError> {
     let mut msg = String::new();
-    let current_dir = env::current_dir().map_err(|err| ExecError(msg.clone(), err))?;
+    macro_rules! make_err {
+        ($e:expr) => {
+            $e.map_err(|err| ExecError(msg.clone(), err))
+        };
+        ($e:expr, $err_msg:expr) => {
+            $e.map_err(|err| ExecError(msg.clone() + $err_msg, err))
+        };
+    }
+
+    let current_dir = make_err!(env::current_dir())?;
     msg += &format!("\n##### TEST {:>7} #####\n", test.id);
     msg += &format!("{}\n", test.commands);
-    clear_dir(&current_dir).map_err(|err| ExecError(msg.clone(), err))?;
-    let bash = exec("bash", &test.commands)
-        .map_err(|err| ExecError(msg.clone() + "##### BASH FAILED! #####", err))?;
-    clear_dir(&current_dir).map_err(|err| ExecError(msg.clone(), err))?;
-    let minishell = exec(program_path, &test.commands)
-        .map_err(|err| ExecError(msg.clone() + "#### FAILED TO RUN! ####", err))?;
+
+    make_err!(clear_dir(&current_dir))?;
+    let bash = make_err!(
+        exec(bash_path, &test.commands),
+        "# BASH  FAILED TO RUN! #"
+    )?;
+
+    make_err!(clear_dir(&current_dir))?;
+    let minishell = make_err!(
+        exec(program_path, &test.commands),
+        "#### FAILED TO RUN! ####"
+    )?;
+
     match (bash.status.code(), minishell.status.code()) {
         (Some(bash_code), Some(minishell_code)) => {
             if bash_code != minishell_code {
@@ -44,18 +64,19 @@ pub fn exec_test(test: &Test, program_path: &Path) -> Result<ExecOk, ExecError> 
                 msg += &format!("Expected status {bash_code}, got {minishell_code}\n");
                 msg += &String::from_utf8_lossy(&minishell.stderr);
                 msg += "########################";
-                return Ok(ExecOk(msg, false));
+                return Ok((msg, false));
             }
         }
         (None, _) => {
             msg += "#### BASH  CRASHED! ####\n";
-            return Ok(ExecOk(msg, false));
+            return Ok((msg, false));
         }
         (_, None) => {
             msg += "### PROGRAM CRASHED! ###\n";
-            return Ok(ExecOk(msg, false));
+            return Ok((msg, false));
         }
     }
+
     let bash_stdout = String::from_utf8_lossy(&bash.stdout);
     let minishell_stdout = String::from_utf8_lossy(&minishell.stdout);
     if bash_stdout != minishell_stdout {
@@ -69,8 +90,9 @@ pub fn exec_test(test: &Test, program_path: &Path) -> Result<ExecOk, ExecError> 
             msg += &String::from_utf8_lossy(&minishell.stderr);
         }
         msg += "########################\n";
-        return Ok(ExecOk(msg, false));
+        return Ok((msg, false));
     }
+
     msg += "####### SUCCESS! #######\n";
-    Ok(ExecOk(msg, true))
+    Ok((msg, true))
 }
