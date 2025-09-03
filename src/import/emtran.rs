@@ -61,8 +61,7 @@ fn parse(reader: impl io::Read, header_size: &Option<usize>) -> Result<Vec<Test>
             .replace("[que des tabulations]", "\t\t\t\t\t\t\t\t")
             .replace("$UID", "$SHELL")
             .replace(" [$TERM],", " \"[$TERM]\",")
-            .replace("sleep 3", "sleep 0")
-            .replace("../", "./");
+            .replace("sleep 3", "sleep 0");
         let mut lines = Vec::new();
         for line in commands.lines() {
             let stripped = line.strip_prefix("$> ");
