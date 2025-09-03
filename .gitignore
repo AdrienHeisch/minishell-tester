@@ -1,4 +1,4 @@
 target
 *.csv
 tmp/
-blacklist
+.testignore
