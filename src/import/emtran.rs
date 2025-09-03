@@ -63,6 +63,18 @@ fn parse(reader: impl io::Read, header_size: &Option<usize>) -> Result<Vec<Test>
             .replace(" [$TERM],", " \"[$TERM]\",")
             .replace("sleep 3", "sleep 0")
             .replace("../", "./");
+        let mut lines = Vec::new();
+        for line in commands.lines() {
+            let stripped = line.strip_prefix("$> ");
+            match stripped {
+                Some(line) => lines.push(line.to_owned()),
+                None => match lines.last_mut() {
+                    Some(prev) => prev.push_str(line),
+                    None => lines.push(line.to_owned()),
+                },
+            }
+        }
+        let commands = lines.join("\n");
         tests.push(Test {
             id,
             level,

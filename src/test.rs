@@ -1,5 +1,5 @@
+use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
-use serde_repr::{Deserialize_repr, Serialize_repr};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Test {
@@ -9,10 +9,7 @@ pub struct Test {
     pub commands: String,
 }
 
-#[derive(
-    Debug, Clone, PartialEq, PartialOrd, clap::ValueEnum, Serialize_repr, Deserialize_repr,
-)]
-#[repr(u8)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, ValueEnum, Serialize, Deserialize)]
 pub enum Level {
     #[allow(unused)]
     Mandatory,

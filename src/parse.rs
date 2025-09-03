@@ -1,5 +1,4 @@
 use crate::{Cli, test::Test, DEFAULT_BLACKLIST_PATH};
-use colored::Colorize;
 use std::{
     fs::{self, File},
     io,
@@ -53,34 +52,10 @@ pub fn parse_tests(path: &Path, cli: &Cli) -> Result<(Vec<Test>, usize), ParseTe
             n_ignored_tests += 1;
             continue;
         }
-        let mut is_valid = true;
         if ["Ctlr-", "env", "export", "unset"]
             .iter()
             .any(|str| test.commands.contains(str))
         {
-            n_ignored_tests += 1;
-            continue;
-        }
-        let mut lines = Vec::new();
-        for line in test.commands.lines() {
-            let stripped = line.strip_prefix("$> ");
-            match stripped {
-                Some(line) => lines.push(line.to_owned()),
-                None => match lines.last_mut() {
-                    Some(prev) => prev.push_str(line),
-                    None => {
-                        is_valid = false;
-                        break;
-                    }
-                },
-            }
-        }
-        test.commands = lines.join("\n");
-        if !is_valid {
-            println!("{}", format!("INVALID TEST : {id}").yellow());
-            if !test.commands.is_empty() {
-                println!("{}", test.commands);
-            }
             n_ignored_tests += 1;
             continue;
         }

@@ -115,5 +115,13 @@ pub fn exec_test(test: &Test, cli: &Cli, base_path: &Path) -> Result<ExecOk, Exe
     }
 
     msg += "####### SUCCESS! #######\n";
+    if let Some(minishell_code) = minishell.status.code() {
+        msg += &format!("Status: {minishell_code}\n")
+    }
+    if !minishell_stdout.is_empty() {
+        msg += "Output:\n";
+        msg += &minishell_stdout;
+    }
+    msg += "########################\n";
     Ok((msg, true))
 }

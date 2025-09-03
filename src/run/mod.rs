@@ -49,7 +49,7 @@ pub fn run_tests(cli: &Cli) -> Result<(), RunError> {
         }
     }
     if n_ignored_tests > 0 {
-        println!("\n!!!   {n_ignored_tests} IGNORED TESTS   !!!");
+        println!("{}", format!("\n!!!   {n_ignored_tests} IGNORED TESTS   !!!").yellow());
     }
     fs::remove_dir_all(path.join(TMP_DIR)).map_err(RunError::ClearCurrentDir)?;
 
