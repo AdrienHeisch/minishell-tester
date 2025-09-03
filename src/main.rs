@@ -12,7 +12,7 @@ use thiserror::Error;
 use url::Url;
 
 const DEFAULT_TESTS_PATH: &str = "tests.csv";
-const DEFAULT_BLACKLIST_PATH: &str = "blacklist";
+const DEFAULT_IGNORE_PATH: &str = ".testignore";
 
 #[derive(Parser)]
 struct Cli {
@@ -40,10 +40,10 @@ struct Cli {
     /// Path to tests csv file
     #[arg(short, long, default_value = DEFAULT_TESTS_PATH)]
     tests: PathBuf,
-    /// Path to blacklist file, should contain test ids to be ignored, each followed by a line break. Lines starting with # are commented
-    #[arg(short, long, default_value = DEFAULT_BLACKLIST_PATH)]
-    blacklist: PathBuf,
-    /// Use this to skip tests
+    /// Path to ignore file, should contain test ids to be ignored, each followed by a line break. Lines starting with # are commented
+    #[arg(short, long, default_value = DEFAULT_IGNORE_PATH)]
+    ignore: PathBuf,
+    /// Ignore the ignore list
     #[arg(short, long)]
     no_ignore: bool,
 }
