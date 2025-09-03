@@ -5,10 +5,15 @@ use clap::Parser;
 use colored::Colorize;
 use exec::{exec_test, ExecError, ExecOk};
 use parse::{parse_tests, ParseTestError};
-use std::{env, fs, io, num::ParseIntError};
+use std::{
+    env, fs, io,
+    num::ParseIntError,
+    path::{Path, PathBuf},
+};
 use thiserror::Error;
 
 const TMP_DIR: &str = "tmp";
+const DEFAULT_BLACKLIST_PATH: &str = "blacklist";
 
 struct Test {
     id: usize,
@@ -30,9 +35,11 @@ struct Cli {
     #[arg(short, long, default_value = "0")]
     start: usize,
     #[arg(short, long, default_value = "../minishell")]
-    program: String,
+    program: PathBuf,
     #[arg(short, long, default_value = "tests.csv")]
-    tests: String,
+    tests: PathBuf,
+    #[arg(short, long, default_value = DEFAULT_BLACKLIST_PATH)]
+    blacklist: PathBuf,
 }
 
 #[derive(Debug, Error)]
@@ -60,23 +67,28 @@ struct SetCurrentDirError(#[from] io::Error);
 struct ClearCurrentDirError(#[from] io::Error);
 
 #[derive(Debug, Error)]
-#[error("Failed to parse blacklist: {0}")]
-struct BlacklistError(#[from] ParseIntError);
+enum BlacklistError {
+    #[error("Failed to parse blacklist: {0}")]
+    Parse(#[from] ParseIntError),
+    #[error("Failed to read blacklist file: {0}")]
+    Io(#[from] io::Error),
+}
 
-fn read_blacklist() -> Result<Vec<usize>, BlacklistError> {
-    match fs::read_to_string("blacklist") {
+fn read_blacklist(path: &Path) -> Result<Vec<usize>, BlacklistError> {
+    match fs::read_to_string(path) {
         Ok(blacklist) => blacklist
             .split('\n')
             .take_while(|id| !id.is_empty())
-            .map(|id| id.parse::<usize>().map_err(BlacklistError))
+            .map(|id| id.parse::<usize>().map_err(Into::into))
             .collect(),
-        Err(_) => Ok(vec![]),
+        Err(_) if path.as_os_str() == DEFAULT_BLACKLIST_PATH => Ok(vec![]),
+        Err(err) => Err(err.into()),
     }
 }
 
 fn run_tests(cli: &Cli) -> Result<(), Error> {
     let path = env::current_dir().map_err(CurrentDirError)?;
-    let blacklist = read_blacklist()?;
+    let blacklist = read_blacklist(&cli.blacklist)?;
     let tests_path = path.join(&cli.tests);
     let program_path = path.join(&cli.program);
     fs::create_dir(path.join(TMP_DIR)).ok();
