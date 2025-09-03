@@ -34,12 +34,18 @@ struct Cli {
     /// Run bash as bash --posix
     #[arg(long)]
     bash_posix: bool,
+    /// Use valgrind to check for memory leaks
+    #[arg(short = 'm', long)]
+    leak_check: bool,
     /// Path to tests csv file
     #[arg(short, long, default_value = DEFAULT_TESTS_PATH)]
     tests: PathBuf,
     /// Path to blacklist file, should contain test ids to be ignored, each followed by a line break. Lines starting with # are commented
     #[arg(short, long, default_value = DEFAULT_BLACKLIST_PATH)]
     blacklist: PathBuf,
+    /// Use this to skip tests
+    #[arg(short, long)]
+    no_ignore: bool,
 }
 
 #[derive(Subcommand)]

@@ -1,4 +1,4 @@
-use crate::{Cli, test::Test, DEFAULT_BLACKLIST_PATH};
+use crate::{test::Test, Cli, DEFAULT_BLACKLIST_PATH};
 use std::{
     fs::{self, File},
     io,
@@ -37,7 +37,10 @@ fn read_blacklist(path: &Path) -> Result<Vec<usize>, BlacklistError> {
 }
 
 pub fn parse_tests(path: &Path, cli: &Cli) -> Result<(Vec<Test>, usize), ParseTestError> {
-    let blacklist = read_blacklist(&cli.blacklist)?;
+    let blacklist = match cli.no_ignore {
+        false => read_blacklist(&cli.blacklist)?,
+        true => vec![],
+    };
     let mut reader = csv::Reader::from_reader(File::open(path)?);
     let mut tests = vec![];
     let mut n_ignored_tests = 0;

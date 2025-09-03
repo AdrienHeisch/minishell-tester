@@ -42,7 +42,7 @@ pub fn run_tests(cli: &Cli) -> Result<(), RunError> {
             Err(err @ ExecError(_, _)) => {
                 println!(
                     "{}",
-                    format!("{}\n{}\n######################", err.0, err.1).red()
+                    format!("{}\n{}\n########################", err.0, err.1).red()
                 );
                 return Ok(());
             }

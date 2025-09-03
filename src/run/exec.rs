@@ -19,16 +19,29 @@ fn exec(
     program: impl AsRef<OsStr>,
     commands: &str,
     options: &[&str],
+    leak_check: bool,
 ) -> io::Result<Output> {
     let mut args = options.to_vec();
     args.extend_from_slice(&["-c", commands]);
-    let mut command = Command::new(program);
-    command.args(args);
-    command.env_clear();
-    command.env("PATH", "");
-    command.env("TERM", "");
-    command.env("SHELL", "");
-    command.output()
+    if leak_check {
+        let mut command = Command::new("valgrind");
+        command
+            .arg("--leak-check=full")
+            .arg("--show-leak-kinds=all")
+            .arg("--error-exitcode=1")
+            .arg("--exit-on-first-error=yes")
+            .arg(program)
+            .args(args);
+        command.output()
+    } else {
+        let mut command = Command::new(program);
+        command.args(args);
+        command.env_clear();
+        command.env("PATH", "");
+        command.env("TERM", "");
+        command.env("SHELL", "");
+        command.output()
+    }
 }
 
 type ExecOk = (String, bool);
@@ -61,15 +74,24 @@ pub fn exec_test(test: &Test, cli: &Cli, base_path: &Path) -> Result<ExecOk, Exe
         bash_options.push("--posix");
     }
     let bash = make_err!(
-        exec(bash_path, &test.commands, &bash_options),
-        "# BASH  FAILED TO RUN! #"
+        exec(bash_path, &test.commands, &bash_options, cli.leak_check),
+        "# BASH FAILED TO RUN! ##"
     )?;
 
     make_err!(clear_dir(&current_dir))?;
     let minishell = make_err!(
-        exec(program_path, &test.commands, &[]),
+        exec(program_path, &test.commands, &[], cli.leak_check),
         "#### FAILED TO RUN! ####"
     )?;
+
+    if cli.leak_check {
+        if !minishell.status.success() {
+            msg += "##### MEMORY LEAK  #####\n";
+            return Ok((msg, false));
+        }
+        msg += "#### NO LEAK FOUND #####\n";
+        return Ok((msg, true));
+    }
 
     match (bash.status.code(), minishell.status.code()) {
         (Some(bash_code), Some(minishell_code)) => {
@@ -82,7 +104,7 @@ pub fn exec_test(test: &Test, cli: &Cli, base_path: &Path) -> Result<ExecOk, Exe
             }
         }
         (None, _) => {
-            msg += "#### BASH  CRASHED! ####\n";
+            msg += "#### BASH CRASHED! #####\n";
             return Ok((msg, false));
         }
         (_, None) => {
