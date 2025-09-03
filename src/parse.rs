@@ -1,17 +1,18 @@
-use thiserror::Error;
-
-use crate::{Cli, Level, Test, DEFAULT_BLACKLIST_PATH};
+use crate::{Cli, test::Test, DEFAULT_BLACKLIST_PATH};
+use colored::Colorize;
 use std::{
     fs::{self, File},
     io,
     num::ParseIntError,
     path::Path,
 };
+use thiserror::Error;
 
 #[derive(Debug, Error)]
-#[error("0")]
+#[error("{0}")]
 pub enum ParseTestError {
     Io(#[from] io::Error),
+    Csv(#[from] csv::Error),
     Blacklist(#[from] BlacklistError),
 }
 
@@ -23,13 +24,12 @@ pub enum BlacklistError {
     Io(#[from] io::Error),
 }
 
-const BONUS_RANGES: &[std::ops::RangeInclusive<usize>] = &[549..=574, 575..=612]; //, 737..=742];
-
 fn read_blacklist(path: &Path) -> Result<Vec<usize>, BlacklistError> {
     match fs::read_to_string(path) {
         Ok(blacklist) => blacklist
             .split('\n')
             .take_while(|id| !id.is_empty())
+            .filter(|id| !id.starts_with("#"))
             .map(|id| id.parse::<usize>().map_err(Into::into))
             .collect(),
         Err(_) if path.as_os_str() == DEFAULT_BLACKLIST_PATH => Ok(vec![]),
@@ -37,86 +37,54 @@ fn read_blacklist(path: &Path) -> Result<Vec<usize>, BlacklistError> {
     }
 }
 
-fn fix_commands(commands: &str) -> String {
-    commands
-        .replace("(touche entrée)", "\n")
-        .replace("[que des espaces]", "           ")
-        .replace("[que des tabulations]", "\t\t\t\t\t\t\t\t")
-        .replace("$UID", "$SHELL")
-        .replace(" [$TERM],", " \"[$TERM]\",")
-        .replace("sleep 3", "sleep 0")
-        .replace("../", "./")
-}
-
 pub fn parse_tests(path: &Path, cli: &Cli) -> Result<(Vec<Test>, usize), ParseTestError> {
     let blacklist = read_blacklist(&cli.blacklist)?;
-    let file = File::open(path)?;
-    let mut n_ignored_tests = 0;
-    let mut reader = csv::Reader::from_reader(file);
+    let mut reader = csv::Reader::from_reader(File::open(path)?);
     let mut tests = vec![];
-    for (id, result) in reader.records().skip(24).enumerate() {
+    let mut n_ignored_tests = 0;
+    for (id, test) in reader.deserialize::<Test>().enumerate() {
+        let mut test = test?;
         if blacklist.contains(&id) {
             n_ignored_tests += 1;
             continue;
         }
-        let record = result.map_err(|err| {
-            let out: io::Error = err.into();
-            out
-        })?;
-        if BONUS_RANGES.iter().any(|range| range.contains(&id)) {
-            if cli.level < Level::Bonus {
-                n_ignored_tests += 1;
-                continue;
-            }
-        } else if cli.level < Level::More {
-            match record.get(2) {
-                Some(str) if !str.is_empty() => {
-                    n_ignored_tests += 1;
-                    continue;
-                }
-                _ => (),
-            }
-        }
-        let mut commands = if let Some(commands) = record.get(1) {
-            let mut is_valid = true;
-            if commands.contains("Ctlr-")
-                || commands.contains("env")
-                || commands.contains("export")
-                || commands.contains("unset")
-            {
-                n_ignored_tests += 1;
-                continue;
-            }
-            let mut lines = Vec::new();
-            for line in commands.lines() {
-                let stripped = line.strip_prefix("$> ");
-                match stripped {
-                    Some(line) => lines.push(line.to_owned()),
-                    None => match lines.last_mut() {
-                        Some(prev) => prev.push_str(line),
-                        None => {
-                            is_valid = false;
-                            break;
-                        }
-                    },
-                }
-            }
-            let commands = lines.join("\n");
-            if !is_valid {
-                println!("INVALID TEST : {id}");
-                if !commands.is_empty() {
-                    println!("{commands}");
-                }
-                n_ignored_tests += 1;
-                continue;
-            }
-            commands
-        } else {
+        test.id = id;
+        if cli.level < test.level {
             n_ignored_tests += 1;
             continue;
-        };
-        commands = fix_commands(&commands);
-        tests.push(Test { id, commands });
+        }
+        let mut is_valid = true;
+        if ["Ctlr-", "env", "export", "unset"]
+            .iter()
+            .any(|str| test.commands.contains(str))
+        {
+            n_ignored_tests += 1;
+            continue;
+        }
+        let mut lines = Vec::new();
+        for line in test.commands.lines() {
+            let stripped = line.strip_prefix("$> ");
+            match stripped {
+                Some(line) => lines.push(line.to_owned()),
+                None => match lines.last_mut() {
+                    Some(prev) => prev.push_str(line),
+                    None => {
+                        is_valid = false;
+                        break;
+                    }
+                },
+            }
+        }
+        test.commands = lines.join("\n");
+        if !is_valid {
+            println!("{}", format!("INVALID TEST : {id}").yellow());
+            if !test.commands.is_empty() {
+                println!("{}", test.commands);
+            }
+            n_ignored_tests += 1;
+            continue;
+        }
+        tests.push(test);
     }
     Ok((tests, n_ignored_tests))
 }

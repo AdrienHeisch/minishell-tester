@@ -1,6 +1,4 @@
-use thiserror::Error;
-
-use crate::{Cli, Test};
+use crate::{test::Test, Cli};
 use std::{
     env,
     ffi::OsStr,
@@ -8,6 +6,7 @@ use std::{
     path::Path,
     process::{Command, Output},
 };
+use thiserror::Error;
 
 fn clear_dir(dir: &Path) -> io::Result<()> {
     fs::remove_dir_all(dir)?;

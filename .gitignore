@@ -1,4 +1,4 @@
 target
-tests.*
+*.csv
 tmp/
 blacklist
