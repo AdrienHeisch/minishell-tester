@@ -1,9 +1,9 @@
-use crate::{Cli, Level, Test, BLACKLIST, BONUS_RANGES};
-use std::{
-    fs::File,
-    io::{self},
-    path::Path,
-};
+use thiserror::Error;
+
+use crate::{Cli, Level, Test};
+use std::{fs::File, io, path::Path};
+
+const BONUS_RANGES: &[std::ops::RangeInclusive<usize>] = &[549..=574, 575..=612]; //, 737..=742];
 
 fn fix_commands(commands: &str) -> String {
     commands
@@ -16,26 +16,37 @@ fn fix_commands(commands: &str) -> String {
         .replace("../", "./")
 }
 
-pub fn parse_tests(path: &Path, cli: &Cli) -> io::Result<Vec<Test>> {
+#[derive(Debug, Error)]
+#[error("0")]
+pub struct ParseTestError(#[from] io::Error);
+
+pub fn parse_tests(
+    path: &Path,
+    cli: &Cli,
+    blacklist: &[usize],
+) -> Result<(Vec<Test>, usize), ParseTestError> {
     let file = File::open(path)?;
-    let mut ignored_tests = 0;
+    let mut n_ignored_tests = 0;
     let mut reader = csv::Reader::from_reader(file);
     let mut tests = vec![];
     for (id, result) in reader.records().skip(24).enumerate() {
-        if BLACKLIST.contains(&id) {
-            ignored_tests += 1;
+        if blacklist.contains(&id) {
+            n_ignored_tests += 1;
             continue;
         }
-        let record = result?;
+        let record = result.map_err(|err| {
+            let out: io::Error = err.into();
+            out
+        })?;
         if BONUS_RANGES.iter().any(|range| range.contains(&id)) {
             if cli.level < Level::Bonus {
-                ignored_tests += 1;
+                n_ignored_tests += 1;
                 continue;
             }
         } else if cli.level < Level::More {
             match record.get(2) {
                 Some(str) if !str.is_empty() => {
-                    ignored_tests += 1;
+                    n_ignored_tests += 1;
                     continue;
                 }
                 _ => (),
@@ -47,9 +58,8 @@ pub fn parse_tests(path: &Path, cli: &Cli) -> io::Result<Vec<Test>> {
                 || commands.contains("env")
                 || commands.contains("export")
                 || commands.contains("unset")
-                || commands.contains(";")
             {
-                ignored_tests += 1;
+                n_ignored_tests += 1;
                 continue;
             }
             let mut lines = Vec::new();
@@ -72,18 +82,16 @@ pub fn parse_tests(path: &Path, cli: &Cli) -> io::Result<Vec<Test>> {
                 if !commands.is_empty() {
                     println!("{commands}");
                 }
-                ignored_tests += 1;
+                n_ignored_tests += 1;
                 continue;
             }
             commands
         } else {
-            ignored_tests += 1;
+            n_ignored_tests += 1;
             continue;
         };
         commands = fix_commands(&commands);
         tests.push(Test { id, commands });
     }
-    println!();
-    println!("!!!   {ignored_tests} IGNORED TESTS   !!!");
-    Ok(tests)
+    Ok((tests, n_ignored_tests))
 }

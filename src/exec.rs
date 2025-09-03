@@ -1,87 +1,76 @@
+use thiserror::Error;
+
 use crate::Test;
 use std::{
-    io::{self},
+    env,
+    ffi::OsStr,
+    fs, io,
     path::Path,
-    process::Command,
+    process::{Command, Output},
 };
 
 fn clear_dir(dir: &Path) -> io::Result<()> {
-    if !dir.is_dir() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "path is not a directory",
-        ));
-    }
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_dir() && !path.symlink_metadata()?.file_type().is_symlink() {
-            std::fs::remove_dir_all(&path)?;
-        } else {
-            std::fs::remove_file(&path)?;
-        }
-    }
+    fs::remove_dir_all(dir)?;
+    fs::create_dir(dir)?;
+    env::set_current_dir(dir)?;
     Ok(())
 }
 
-pub fn exec_test(test: &Test, program_path: &Path) -> io::Result<bool> {
-    let current_dir = std::env::current_dir()?;
-    println!();
-    println!("##### TEST {:>7} #####", test.id);
-    println!("{}", test.commands);
-    clear_dir(&current_dir)?;
-    let bash = match Command::new("bash").args(["-c", &test.commands]).output() {
-        Ok(minishell) => minishell,
-        Err(_) => {
-            println!("##### INVALID TEST #####");
-            return Ok(false);
-        }
-    };
-    clear_dir(&current_dir)?;
-    let minishell = match Command::new(program_path)
-        .args(["-c", &test.commands])
-        .output()
-    {
-        Ok(minishell) => minishell,
-        Err(_) => {
-            println!("#### FAILED TO RUN! ####");
-            return Ok(false);
-        }
-    };
+fn exec(program: impl AsRef<OsStr>, commands: &str) -> io::Result<Output> {
+    Command::new(program).args(["-c", commands]).output()
+}
+
+pub struct ExecOk(pub String, pub bool);
+
+#[derive(Debug, Error)]
+#[error("{0}\n{1}\n######################")]
+pub struct ExecError(pub String, pub io::Error);
+
+pub fn exec_test(test: &Test, program_path: &Path) -> Result<ExecOk, ExecError> {
+    let mut msg = String::new();
+    let current_dir = env::current_dir().map_err(|err| ExecError(msg.clone(), err))?;
+    msg += &format!("\n##### TEST {:>7} #####\n", test.id);
+    msg += &format!("{}\n", test.commands);
+    clear_dir(&current_dir).map_err(|err| ExecError(msg.clone(), err))?;
+    let bash = exec("bash", &test.commands)
+        .map_err(|err| ExecError(msg.clone() + "##### BASH FAILED! #####", err))?;
+    clear_dir(&current_dir).map_err(|err| ExecError(msg.clone(), err))?;
+    let minishell = exec(program_path, &test.commands)
+        .map_err(|err| ExecError(msg.clone() + "#### FAILED TO RUN! ####", err))?;
     match (bash.status.code(), minishell.status.code()) {
         (Some(bash_code), Some(minishell_code)) => {
             if bash_code != minishell_code {
-                println!("######## FAILED ########");
-                println!("Expected status {bash_code}, got {minishell_code}");
-                println!("{}", String::from_utf8_lossy(&minishell.stderr));
-                println!("########################");
-                return Ok(false);
+                msg += "######## FAILED ########\n";
+                msg += &format!("Expected status {bash_code}, got {minishell_code}\n");
+                msg += &String::from_utf8_lossy(&minishell.stderr);
+                msg += "########################";
+                return Ok(ExecOk(msg, false));
             }
         }
         (None, _) => {
-            println!("#### FAILED TO RUN! ####");
-            return Ok(false);
+            msg += "#### BASH  CRASHED! ####\n";
+            return Ok(ExecOk(msg, false));
         }
         (_, None) => {
-            println!("### PROGRAM CRASHED! ###");
-            return Ok(false);
+            msg += "### PROGRAM CRASHED! ###\n";
+            return Ok(ExecOk(msg, false));
         }
     }
     let bash_stdout = String::from_utf8_lossy(&bash.stdout);
     let minishell_stdout = String::from_utf8_lossy(&minishell.stdout);
     if bash_stdout != minishell_stdout {
-        println!("######## FAILED ########");
-        println!("Expected output:");
-        println!("{bash_stdout}");
-        println!("Tested output:");
-        println!("{minishell_stdout}");
+        msg += "######## FAILED ########\n";
+        msg += "Expected output:\n";
+        msg += &bash_stdout;
+        msg += "Tested output:\n";
+        msg += &minishell_stdout;
         if !minishell.stderr.is_empty() {
-            println!("Error:");
-            println!("{}", String::from_utf8_lossy(&minishell.stderr));
+            msg += "Error:\n";
+            msg += &String::from_utf8_lossy(&minishell.stderr);
         }
-        println!("########################");
-        return Ok(false);
+        msg += "########################\n";
+        return Ok(ExecOk(msg, false));
     }
-    println!("####### SUCCESS! #######");
-    Ok(true)
+    msg += "####### SUCCESS! #######\n";
+    Ok(ExecOk(msg, true))
 }
