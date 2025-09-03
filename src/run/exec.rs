@@ -15,26 +15,19 @@ fn clear_dir(dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn clear_env(command: &mut Command) {
-    command.env_clear();
-    command.env("PATH", "");
-    command.env("TERM", "");
-    command.env("SHELL", "");
-}
-
 fn exec(
     program: impl AsRef<OsStr>,
     commands: &str,
     options: &[&str],
-    no_env: bool,
 ) -> io::Result<Output> {
     let mut args = options.to_vec();
     args.extend_from_slice(&["-c", commands]);
     let mut command = Command::new(program);
     command.args(args);
-    if no_env {
-        clear_env(&mut command);
-    }
+    command.env_clear();
+    command.env("PATH", "");
+    command.env("TERM", "");
+    command.env("SHELL", "");
     command.output()
 }
 
@@ -68,13 +61,13 @@ pub fn exec_test(test: &Test, cli: &Cli, base_path: &Path) -> Result<ExecOk, Exe
         bash_options.push("--posix");
     }
     let bash = make_err!(
-        exec(bash_path, &test.commands, &bash_options, cli.no_env),
+        exec(bash_path, &test.commands, &bash_options),
         "# BASH  FAILED TO RUN! #"
     )?;
 
     make_err!(clear_dir(&current_dir))?;
     let minishell = make_err!(
-        exec(program_path, &test.commands, &[], cli.no_env),
+        exec(program_path, &test.commands, &[]),
         "#### FAILED TO RUN! ####"
     )?;
 

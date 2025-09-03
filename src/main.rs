@@ -34,9 +34,6 @@ struct Cli {
     /// Run bash as bash --posix
     #[arg(long)]
     bash_posix: bool,
-    /// Will not clear some readonly variables in bash -> list with "env -i bash -c set"
-    #[arg(long)]
-    no_env: bool,
     /// Path to tests csv file
     #[arg(short, long, default_value = DEFAULT_TESTS_PATH)]
     tests: PathBuf,
