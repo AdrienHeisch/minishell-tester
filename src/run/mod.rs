@@ -29,7 +29,7 @@ pub fn run_tests(cli: &Cli) -> Result<(), RunError> {
 
     fs::create_dir(path.join(TMP_DIR)).ok();
     env::set_current_dir(path.join(TMP_DIR)).map_err(RunError::SetCurrentDir)?;
-    for test in tests.iter().skip_while(|test| test.id != cli.start) {
+    for test in tests.iter() {
         match exec_test(test, cli, &path) {
             Ok((message, success)) => {
                 if success {

@@ -62,6 +62,12 @@ fn parse(reader: impl io::Read, header_size: &Option<usize>) -> Result<Vec<Test>
             .replace("$UID", "$SHELL")
             .replace(" [$TERM],", " \"[$TERM]\",")
             .replace("sleep 3", "sleep 0");
+        if ["Ctlr-", "env -i", "[touche du haut]"]
+            .iter()
+            .any(|str| commands.contains(str))
+        {
+            continue;
+        }
         let mut lines = Vec::new();
         for line in commands.lines() {
             let stripped = line.strip_prefix("$> ");

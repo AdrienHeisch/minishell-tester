@@ -38,6 +38,9 @@ struct Cli {
     /// Use valgrind to check for memory leaks
     #[arg(short = 'm', long)]
     leak_check: bool,
+    ///// Check for correct error messages
+    //#[arg(short, long)]
+    //error_check: bool,
     /// Path to tests csv file
     #[arg(short, long, default_value = DEFAULT_TESTS_PATH)]
     tests: PathBuf,
@@ -47,6 +50,9 @@ struct Cli {
     /// Ignore the ignore list
     #[arg(short, long)]
     no_ignore: bool,
+    /// Enable isolation with bubblewrap
+    #[arg(short, long)]
+    bubblewrap: Option<PathBuf>,
 }
 
 #[derive(Subcommand)]

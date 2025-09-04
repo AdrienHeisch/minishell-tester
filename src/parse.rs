@@ -28,8 +28,9 @@ fn read_ignore_file(path: &Path) -> Result<Vec<usize>, IgnoreError> {
         Ok(ignore) => ignore
             .split('\n')
             .take_while(|id| !id.is_empty())
-            .filter(|id| !id.starts_with("#"))
-            .map(|id| id.parse::<usize>().map_err(Into::into))
+            .filter_map(|id| id.split('#').next())
+            .filter(|id| !id.is_empty())
+            .map(|id| id.trim().parse::<usize>().map_err(Into::into))
             .collect(),
         Err(_) if path.as_os_str() == DEFAULT_IGNORE_PATH => Ok(vec![]),
         Err(err) => Err(err.into()),
@@ -45,6 +46,9 @@ pub fn parse_tests(path: &Path, cli: &Cli) -> Result<(Vec<Test>, usize), ParseTe
     let mut tests = vec![];
     let mut n_ignored_tests = 0;
     for (id, test) in reader.deserialize::<Test>().enumerate() {
+        if id < cli.start {
+            continue ;
+        }
         let mut test = test?;
         if ignore.contains(&id) {
             n_ignored_tests += 1;
@@ -52,13 +56,6 @@ pub fn parse_tests(path: &Path, cli: &Cli) -> Result<(Vec<Test>, usize), ParseTe
         }
         test.id = id;
         if cli.level < test.level {
-            n_ignored_tests += 1;
-            continue;
-        }
-        if ["Ctlr-", "env", "export", "unset"]
-            .iter()
-            .any(|str| test.commands.contains(str))
-        {
             n_ignored_tests += 1;
             continue;
         }
