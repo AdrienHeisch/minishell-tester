@@ -1,4 +1,4 @@
-use crate::{test::Test, Cli, DEFAULT_IGNORE_PATH};
+use crate::{test::Test, Cli};
 use std::{
     fs::{self, File},
     io,
@@ -32,14 +32,16 @@ fn read_ignore_file(path: &Path) -> Result<Vec<usize>, IgnoreError> {
             .filter(|id| !id.is_empty())
             .map(|id| id.trim().parse::<usize>().map_err(Into::into))
             .collect(),
-        Err(_) if path.as_os_str() == DEFAULT_IGNORE_PATH => Ok(vec![]),
+        Err(err) if matches!(err.kind(), io::ErrorKind::NotFound) => Ok(vec![]),
         Err(err) => Err(err.into()),
     }
 }
 
 pub fn parse_tests(path: &Path, cli: &Cli) -> Result<(Vec<Test>, usize), ParseTestError> {
+    let mut ignore_path = path.to_owned();
+    ignore_path.set_extension("ignore");
     let ignore = match cli.no_ignore {
-        false => read_ignore_file(&cli.ignore)?,
+        false => read_ignore_file(&ignore_path)?,
         true => vec![],
     };
     let mut reader = csv::Reader::from_reader(File::open(path)?);

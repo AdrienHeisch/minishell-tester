@@ -12,7 +12,6 @@ use thiserror::Error;
 use url::Url;
 
 const DEFAULT_TESTS_PATH: &str = "tests.csv";
-const DEFAULT_IGNORE_PATH: &str = ".testignore";
 
 #[derive(Parser)]
 /// IMPORTANT : your minishell needs to support the -c option : ./minishell -c "echo test"
@@ -44,11 +43,8 @@ struct Cli {
     /// Path to tests csv file
     #[arg(short, long, default_value = DEFAULT_TESTS_PATH)]
     tests: PathBuf,
-    /// Path to ignore file, should contain test ids to be ignored, each followed by a line break. Lines starting with # are commented
-    #[arg(short, long, default_value = DEFAULT_IGNORE_PATH)]
-    ignore: PathBuf,
     /// Ignore the ignore list
-    #[arg(short, long)]
+    #[arg(short = 'i', long)]
     no_ignore: bool,
     /// Enable isolation with bubblewrap
     #[arg(short, long)]
