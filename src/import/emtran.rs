@@ -1,15 +1,13 @@
 use super::{DownloadError, ImportError, ImportSource, ParseTestError};
-use crate::test::{Level, Test};
+use crate::test::Test;
 use reqwest::{blocking::Response, IntoUrl, Url};
 use std::{
     fs::{self, OpenOptions},
     io,
-    path::Path,
 };
 
+const FILENAME_TEMPLATE: &str = "emtran_{}.csv";
 const ORIGINAL_URL: &str = "https://docs.google.com/spreadsheets/d/1uJHQu0VPsjjBkR4hxOeCMEt3AOM1Hp_SmUzPFhAH-nA/edit#gid=0";
-const HEADER_SIZE: usize = 24;
-const BONUS_RANGES: &[std::ops::RangeInclusive<usize>] = &[549..=574, 575..=612, 737..=742];
 
 fn download_file(url: &(impl IntoUrl + Clone)) -> Result<Response, DownloadError> {
     let mut url = url.clone().into_url()?;
@@ -36,22 +34,19 @@ fn get_reader(source: &ImportSource) -> Result<Box<dyn io::Read>, ImportError> {
     })
 }
 
-fn parse(reader: impl io::Read, header_size: &Option<usize>) -> Result<Vec<Test>, ParseTestError> {
+type Tests = (Vec<Test>, Vec<Test>, Vec<Test>);
+
+fn parse(reader: impl io::Read, header_size: usize) -> Result<Tests, ParseTestError> {
     let mut reader = csv::Reader::from_reader(reader);
-    let mut tests = vec![];
-    for (id, record) in reader
-        .records()
-        .skip(header_size.unwrap_or(HEADER_SIZE))
-        .enumerate()
-    {
+    let (mut mandatory, mut bonus, mut more) = Tests::default();
+    for record in reader.records().skip(header_size) {
         let record = record?;
-        let level = if BONUS_RANGES.iter().any(|range| range.contains(&id)) {
-            Level::Bonus
-        } else {
-            match record.get(2) {
-                Some(str) if !str.is_empty() => Level::More,
-                _ => Level::Mandatory,
-            }
+        let out = match record.get(9) {
+            Some(str) if str.contains("[BONUS]") => &mut bonus,
+            _ => match record.get(2) {
+                Some(str) if !str.is_empty() => &mut more,
+                _ => &mut mandatory,
+            },
         };
         let commands = record
             .get(1)
@@ -62,48 +57,64 @@ fn parse(reader: impl io::Read, header_size: &Option<usize>) -> Result<Vec<Test>
             .replace("$UID", "$SHELL")
             .replace(" [$TERM],", " \"[$TERM]\",")
             .replace("sleep 3", "sleep 0");
-        if ["Ctlr-", "env -i", "[touche du haut]"]
-            .iter()
-            .any(|str| commands.contains(str))
+        if [
+            "Ctlr-",
+            "env -i",
+            "[touche du haut]",
+            "!!! Contenu du fichier",
+        ]
+        .iter()
+        .any(|str| commands.contains(str))
         {
             continue;
         }
-        let mut lines = Vec::new();
+        let mut expected = record.get(7).unwrap_or_default().lines();
+        let mut lines = Vec::<String>::new();
         for line in commands.lines() {
-            let stripped = line.strip_prefix("$> ");
-            match stripped {
-                Some(line) => lines.push(line.to_owned()),
+            let line = match line.strip_prefix("$> ") {
+                Some(line) => line.to_string(),
                 None => match lines.last_mut() {
-                    Some(prev) => prev.push_str(line),
-                    None => lines.push(line.to_owned()),
+                    Some(prev) => {
+                        prev.push_str(line);
+                        continue;
+                    }
+                    None => line.to_string(),
                 },
+            };
+            lines.push(line.clone());
+            if line.contains("<<") {
+                expected
+                    .by_ref()
+                    .map_while(|line| line.strip_prefix("> "))
+                    .for_each(|line| lines.push(line.to_string()));
             }
         }
         let commands = lines.join("\n");
-        tests.push(Test {
-            id,
-            level,
-            commands,
-        });
+        let id = out.len();
+        out.push(Test { id, commands });
     }
-    Ok(tests)
+    Ok((mandatory, bonus, more))
 }
 
-pub fn import(
-    source: &ImportSource,
-    output: &Path,
-    header_size: &Option<usize>,
-) -> Result<(), ImportError> {
-    let tests = parse(get_reader(source)?, header_size)?;
+fn write_to_file(tests: &[Test], name: &str) -> Result<(), ImportError> {
     let file = OpenOptions::new()
-        .create_new(true)
+        .create(true)
+        .truncate(true)
         .write(true)
-        .open(output)
+        .open(FILENAME_TEMPLATE.replace("{}", name))
         .map_err(ImportError::WriteOutput)?;
     let mut writer = csv::Writer::from_writer(file);
     for test in tests {
         writer.serialize(test)?;
     }
+    Ok(())
+}
+
+pub fn import(source: &ImportSource, header_size: usize) -> Result<(), ImportError> {
+    let (mandatory, bonus, more) = parse(get_reader(source)?, header_size)?;
+    write_to_file(&mandatory, "mandatory")?;
+    write_to_file(&bonus, "bonus")?;
+    write_to_file(&more, "more")?;
     println!("Done !");
     Ok(())
 }

@@ -1,256 +1,258 @@
-use crate::{test::Test, Cli};
+use crate::{test::Test, Run};
 use regex::Regex;
 use std::{
     env,
     ffi::OsStr,
-    fs, io,
+    fs,
+    io::{self, Write},
     path::Path,
-    process::{Command, Output},
+    process::{Command, Output, Stdio},
 };
 use thiserror::Error;
 
-fn clear_dir(dir: &Path) -> io::Result<()> {
+#[derive(Debug, Error)]
+#[error("Error during test execution: {0}")]
+pub enum ExecError {
+    Io(#[from] io::Error)
+}
+
+fn setup_test(dir: &Path, is_bwrap: bool) -> Result<(), ExecError> {
     fs::remove_dir_all(dir)?;
     fs::create_dir(dir)?;
     env::set_current_dir(dir)?;
+    if is_bwrap {
+        fs::create_dir("root");
+        fs::create_dir(".bin");
+    }
     Ok(())
+}
+
+fn sort_env(bytes: &mut Vec<u8>) {
+    let str = String::from_utf8_lossy(bytes);
+    let mut list = vec![];
+    let mut output = vec![];
+    let regex_env = Regex::new(r"^\S+=\S*$").unwrap();
+    let regex_export = Regex::new(r"^declare -x \S+$").unwrap();
+    for line in str.lines() {
+        if regex_env.is_match(line) || regex_export.is_match(line) {
+            list.push(line);
+        } else {
+            if !list.is_empty() {
+                list.sort();
+                for line in list {
+                    output.push(line);
+                }
+                list = vec![];
+            }
+            output.push(line);
+        }
+    }
+    list.sort();
+    for line in list {
+        output.push(line);
+    }
+    *bytes = output.join("\n").as_bytes().to_vec();
+}
+
+fn ensure_newline(bytes: &mut Vec<u8>) {
+    match bytes.last_mut() {
+        Some(b'\n') | None => (),
+        _ => bytes.push(b'\n'),
+    }
 }
 
 fn exec(
     program: impl AsRef<OsStr>,
-    commands: &str,
+    test: &str,
     options: &[&str],
     leak_check: bool,
-    bubblewrap: Option<&Path>,
-) -> io::Result<Output> {
-    let mut command;
-    match (bubblewrap, leak_check) {
-        (Some(bubblewrap), true) => {
-            command = Command::new(bubblewrap);
-            command
-                .args(["--bind", env::current_dir().unwrap().to_str().unwrap(), "/"])
-                .args(["--proc", "/proc"])
-                .args(["--ro-bind", "/usr", "/usr"])
-                .args(["--ro-bind", "/lib64", "/lib64"])
-                .args(["--chdir", "/"])
-                .arg("--unshare-pid")
-                .arg("--new-session");
-            command.args([
-                "valgrind",
-                "--leak-check=full",
-                "--show-leak-kinds=all",
-                "--error-exitcode=1",
-                "--exit-on-first-error=yes",
-            ]);
-            command.arg("program");
-        }
-        (Some(bubblewrap), false) => {
-            command = Command::new(bubblewrap);
-            command
-                .args(["--bind", env::current_dir().unwrap().to_str().unwrap(), "/"])
-                .args(["--proc", "/proc"])
-                .args(["--ro-bind", "/usr", "/usr"])
-                .args(["--ro-bind", "/lib64", "/lib64"])
-                .args(["--chdir", "/"])
-                .arg("--unshare-pid")
-                .arg("--new-session");
-            command.arg("program");
-        }
-        (None, true) => {
-            command = Command::new("valgrind");
-            command.args([
-                "--leak-check=full",
-                "--show-leak-kinds=all",
-                "--error-exitcode=1",
-                "--exit-on-first-error=yes",
-            ]);
-            command.arg("program");
-        }
-        (None, false) => {
-            command = Command::new(program);
-            command
-                .env_clear()
-                .env("PATH", "/usr/bin")
-                .env("TERM", "")
-                .env("SHELL", "");
-        }
+    bwrap: Option<&Path>,
+) -> Result<Output, ExecError> {
+    let mut command = if let Some(bwrap) = bwrap {
+        let mut command = Command::new(bwrap);
+        command
+            .args(["--bind", ".", "/"])
+            .args(["--proc", "/proc"])
+            .args(["--dev", "/dev"])
+            .args(["--ro-bind", "/usr", "/usr"])
+            .args(["--ro-bind", "/lib64", "/lib64"])
+            .args(["--chdir", "/root"])
+            .arg("--unshare-all")
+            .arg("--die-with-parent")
+            .arg("--new-session");
+        command
+    } else if leak_check {
+        Command::new("valgrind")
+    } else {
+        Command::new(&program)
     };
-    command.args(options).args(["-c", commands]);
-    command.output()
+    if leak_check {
+        if bwrap.is_some() {
+            command.arg("valgrind");
+        }
+        command.args([
+            "--leak-check=full",
+            "--show-leak-kinds=all",
+            "--error-exitcode=1",
+            "--exit-on-first-error=yes",
+        ]);
+    } else if bwrap.is_some() {
+        command.arg(&program);
+    }
+    command.args(options);
+    command
+        .env_clear()
+        .env("PATH", "/usr/bin")
+        .env("USER", "maxitester")
+        .env("HOME", "/home/maxitester")
+        .env("SHELL", "/usr/bin/someshell")
+        .env("TERM", "xterm-256color")
+        .env("SHLVL", "");
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command.spawn()?;
+    let mut stdin = child.stdin.take().unwrap();
+    for line in test.lines() {
+        stdin.write_all(line.as_bytes())?;
+        stdin.write_all(b"\n")?;
+        stdin.flush()?;
+    }
+    drop(stdin);
+    let mut output = child.wait_with_output()?;
+    sort_env(&mut output.stdout);
+    sort_env(&mut output.stderr);
+    ensure_newline(&mut output.stdout);
+    ensure_newline(&mut output.stderr);
+    Ok(output)
 }
 
-type ExecOk = (String, bool);
+fn exec_minishell(test: &Test, cli: &Run, base_path: &Path) -> Result<Output, ExecError> {
+    let program_path = base_path.join(&cli.minishell);
+    let current_dir = env::current_dir()?;
 
-#[derive(Debug, Error)]
-#[error("{0}\n{1}\n######################")]
-pub struct ExecError(pub String, pub io::Error);
-
-pub fn exec_test(test: &Test, cli: &Cli, base_path: &Path) -> Result<ExecOk, ExecError> {
-    let program_path = base_path.join(&cli.program);
-    let bash_path = &cli.bash;
-
-    let mut msg = String::new();
-    macro_rules! make_err {
-        ($e:expr) => {
-            $e.map_err(|err| ExecError(msg.clone(), err))
-        };
-        ($e:expr, $err_msg:expr) => {
-            $e.map_err(|err| ExecError(msg.clone() + $err_msg, err))
-        };
+    setup_test(&current_dir, cli.bwrap.is_some())?;
+    if cli.bwrap.is_some() {
+        fs::copy(&program_path, current_dir.join(".bin/minishell")).unwrap();
     }
+    exec(
+        if cli.bwrap.is_some() {
+            OsStr::new("/.bin/minishell")
+        } else {
+            OsStr::new(&program_path)
+        },
+        &test.commands,
+        &[],
+        cli.leak_check,
+        cli.bwrap.as_deref(),
+    )
+}
 
-    let current_dir = make_err!(env::current_dir())?;
-    msg += &format!("\n##### TEST {:>7} #####\n", test.id);
-    msg += &format!("{}\n", test.commands);
+fn adjust_bash_output(bytes: &mut Vec<u8>) {
+    let str = String::from_utf8_lossy(bytes).replace("/usr/bin/env", "env");
+    // str.replace("bash", "minishell");
+    *bytes = str.as_bytes().to_vec();
+}
 
-    make_err!(clear_dir(&current_dir))?;
+fn exec_bash(test: &Test, cli: &Run) -> Result<Output, ExecError> {
+    let bash_path = &cli.bash;
+    let current_dir = env::current_dir()?;
+
+    setup_test(&current_dir, cli.bwrap.is_some())?;
     let mut bash_options = Vec::new();
     if cli.bash_posix {
         bash_options.push("--posix");
     }
-    let bash = make_err!(
-        exec(
-            bash_path,
-            &test.commands,
-            &bash_options,
-            cli.leak_check,
-            cli.bubblewrap.as_deref()
-        ),
-        "# BASH FAILED TO RUN! ##"
+    let mut output = exec(
+        bash_path,
+        &test.commands,
+        &bash_options,
+        cli.leak_check,
+        cli.bwrap.as_deref(),
     )?;
+    adjust_bash_output(&mut output.stdout);
+    adjust_bash_output(&mut output.stderr);
+    Ok(output)
+}
 
-    make_err!(clear_dir(&current_dir))?;
-    if cli.bubblewrap.is_some() {
-        fs::copy(&program_path, current_dir.join("minishell")).unwrap();
-    }
-    let minishell = make_err!(
-        exec(
-            if cli.bubblewrap.is_some() {
-                OsStr::new("/minishell")
-            } else {
-                OsStr::new(&program_path)
-            },
-            &test.commands,
-            &[],
-            cli.leak_check,
-            cli.bubblewrap.as_deref()
-        ),
-        "#### FAILED TO RUN! ####"
-    )?;
+pub fn exec_test(
+    test: &Test,
+    cli: &Run,
+    base_path: &Path,
+    output: &mut impl io::Write,
+) -> Result<bool, ExecError> {
+    writeln!(output)?;
+    writeln!(output, "##### TEST {:>7} #####", test.id)?;
+    writeln!(output, "{}", test.commands)?;
+
+    let minishell = exec_minishell(test, cli, base_path)
+        .inspect_err(|_| drop(writeln!(output, "#### FAILED TO RUN! ####")))?;
 
     if cli.leak_check {
         if !minishell.status.success() {
-            msg += "##### MEMORY LEAK  #####\n";
-            return Ok((msg, false));
+            writeln!(output, "##### MEMORY LEAK  #####")?;
+            return Ok(false);
         }
-        msg += "#### NO LEAK FOUND #####\n";
-        return Ok((msg, true));
+        writeln!(output, "#### NO LEAK FOUND #####")?;
+        return Ok(true);
     }
+
+    let bash =
+        exec_bash(test, cli).inspect_err(|_| drop(writeln!(output, "# BASH FAILED TO RUN! ##")))?;
 
     match (bash.status.code(), minishell.status.code()) {
         (Some(bash_code), Some(minishell_code)) => {
             if bash_code != minishell_code {
-                msg += "######## FAILED ########\n";
-                msg += &format!("Expected status {bash_code}, got {minishell_code}\n");
+                writeln!(output, "######## FAILED ########")?;
+                writeln!(output, "Expected status {bash_code}, got {minishell_code}")?;
                 if !minishell.stdout.is_empty() {
-                    msg += "Output:\n";
-                    msg += &String::from_utf8_lossy(&minishell.stdout);
-                    if !msg.ends_with('\n') {
-                        msg += "\n";
-                    }
+                    writeln!(output, "Output:")?;
+                    output.write_all(&minishell.stdout)?;
                 }
                 if !minishell.stderr.is_empty() {
-                    msg += "Error:\n";
-                    msg += &String::from_utf8_lossy(&minishell.stderr);
-                    if !msg.ends_with('\n') {
-                        msg += "\n";
-                    }
+                    writeln!(output, "Error:")?;
+                    output.write_all(&minishell.stderr)?;
                 }
-                msg += "########################";
-                return Ok((msg, false));
+                writeln!(output, "########################")?;
+                return Ok(false);
             }
         }
         (None, _) => {
-            msg += "#### BASH CRASHED! #####\n";
-            return Ok((msg, false));
+            writeln!(output, "#### BASH CRASHED! #####")?;
+            return Ok(false);
         }
         (_, None) => {
-            msg += "### PROGRAM CRASHED! ###\n";
-            return Ok((msg, false));
+            writeln!(output, "### PROGRAM CRASHED! ###")?;
+            return Ok(false);
         }
     }
-
-    fn sort_env(str: &str) -> String {
-        let mut list = vec![];
-        let mut output = vec![];
-        let regex_env = Regex::new(r"^\S+=\S*$").unwrap();
-        let regex_export = Regex::new(r"^declare -x \S+$").unwrap();
-        for line in str.lines() {
-            if regex_env.is_match(line) || regex_export.is_match(line) {
-                list.push(line);
-            } else {
-                if !list.is_empty() {
-                    list.sort();
-                    for line in list {
-                        output.push(line);
-                    }
-                    list = vec![];
-                }
-                output.push(line);
-            }
-        }
-        list.sort();
-        for line in list {
-            output.push(line);
-        }
-        output.join("\n")
-    }
-    let bash_stdout = String::from_utf8_lossy(&bash.stdout);
-    let bash_stdout = bash_stdout.replace("/usr/bin/env", "env");
-    let bash_stdout = sort_env(&bash_stdout);
-    let minishell_stdout = String::from_utf8_lossy(&minishell.stdout);
-    let minishell_stdout = sort_env(&minishell_stdout);
-    if bash_stdout != minishell_stdout {
-        msg += "######## FAILED ########\n";
-        msg += "Expected output:\n";
-        msg += &bash_stdout;
-        if !msg.ends_with('\n') {
-            msg += "\n";
-        }
-        msg += "Tested output:\n";
-        msg += &minishell_stdout;
-        if !msg.ends_with('\n') {
-            msg += "\n";
-        }
+    if bash.stdout != minishell.stdout {
+        writeln!(output, "######## FAILED ########")?;
+        writeln!(output, "Expected output:")?;
+        output.write_all(&bash.stdout)?;
+        writeln!(output, "Tested output:")?;
+        output.write_all(&minishell.stdout)?;
         if !minishell.stderr.is_empty() {
-            msg += "Error:\n";
-            msg += &String::from_utf8_lossy(&minishell.stderr);
-            if !msg.ends_with('\n') {
-                msg += "\n";
-            }
+            writeln!(output, "Error:")?;
+            output.write_all(&minishell.stderr)?;
         }
-        msg += "########################\n";
-        return Ok((msg, false));
+        writeln!(output, "########################")?;
+        return Ok(false);
     }
 
-    msg += "####### SUCCESS! #######\n";
+    writeln!(output, "####### SUCCESS! #######")?;
     if let Some(minishell_code) = minishell.status.code() {
-        msg += &format!("Status: {minishell_code}\n")
+        writeln!(output, "Status: {minishell_code}")?;
     }
-    if !minishell_stdout.is_empty() {
-        msg += "Output:\n";
-        msg += &minishell_stdout;
-        if !msg.ends_with('\n') {
-            msg += "\n";
-        }
+    if !minishell.stdout.is_empty() {
+        writeln!(output, "Output:")?;
+        output.write_all(&minishell.stdout)?;
     }
     if !minishell.stderr.is_empty() {
-        msg += "Error:\n";
-        msg += &String::from_utf8_lossy(&minishell.stderr);
-        if !msg.ends_with('\n') {
-            msg += "\n";
-        }
+        writeln!(output, "Error:")?;
+        output.write_all(&minishell.stderr)?;
     }
-    msg += "########################\n";
-    Ok((msg, true))
+    writeln!(output, "########################")?;
+    Ok(true)
 }

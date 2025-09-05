@@ -1,4 +1,4 @@
-use crate::{test::Test, Cli};
+use crate::{test::Test, Run};
 use std::{
     fs::{self, File},
     io,
@@ -37,7 +37,7 @@ fn read_ignore_file(path: &Path) -> Result<Vec<usize>, IgnoreError> {
     }
 }
 
-pub fn parse_tests(path: &Path, cli: &Cli) -> Result<(Vec<Test>, usize), ParseTestError> {
+pub fn parse_tests(path: &Path, cli: &Run) -> Result<(Vec<Test>, usize), ParseTestError> {
     let mut ignore_path = path.to_owned();
     ignore_path.set_extension("ignore");
     let ignore = match cli.no_ignore {
@@ -47,17 +47,12 @@ pub fn parse_tests(path: &Path, cli: &Cli) -> Result<(Vec<Test>, usize), ParseTe
     let mut reader = csv::Reader::from_reader(File::open(path)?);
     let mut tests = vec![];
     let mut n_ignored_tests = 0;
-    for (id, test) in reader.deserialize::<Test>().enumerate() {
-        if id < cli.start {
+    for test in reader.deserialize::<Test>() {
+        let test = test?;
+        if test.id < cli.start {
             continue ;
         }
-        let mut test = test?;
-        if ignore.contains(&id) {
-            n_ignored_tests += 1;
-            continue;
-        }
-        test.id = id;
-        if cli.level < test.level {
+        if ignore.contains(&test.id) {
             n_ignored_tests += 1;
             continue;
         }

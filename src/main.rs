@@ -1,5 +1,4 @@
 mod import;
-mod parse;
 mod run;
 mod test;
 
@@ -7,27 +6,48 @@ use clap::{Args, Parser, Subcommand};
 use import::import_emtran;
 use run::{run_tests, RunError};
 use std::{fmt::Debug, path::PathBuf};
-use test::Level;
 use thiserror::Error;
 use url::Url;
 
-const DEFAULT_TESTS_PATH: &str = "tests.csv";
-
 #[derive(Parser)]
-/// IMPORTANT : your minishell needs to support the -c option : ./minishell -c "echo test"
+/// Maxitest : a minishell tester
+///
+/// Tests are stored in csv files. Use a spreadsheet editor for convenience. Use the example
+/// subcommand to have a look at the test format.
+///
+/// For any xxx.csv file, a xxx.ignore file can contain a list of test ids to ignore. One id per
+/// line, use # to add comments.
+///
+/// Try the import-emtran subcommand to get a few hundred tests.
 struct Cli {
     #[command(subcommand)]
-    subcommand: Option<Subcommands>,
+    command: Subcommands,
+}
 
-    /// Levels are in order here on the right, higher levels will still run lower level tests
-    #[arg(short, long, default_value = "mandatory")]
-    level: Level,
+#[derive(Subcommand)]
+enum Subcommands {
+    Run(Run),
+    ImportEmtran(ImportEmtran),
+}
+
+#[derive(Args)]
+/// Run tests from listed files
+struct Run {
     /// Use this to skip tests
     #[arg(short, long, default_value = "0")]
     start: usize,
+    /// Execute one single test
+    #[arg(short, long)]
+    one: bool,
+    /// Don't stop on failed test
+    #[arg(short, long)]
+    keep_going: bool,
+    /// Don't show passed tests
+    #[arg(short, long)]
+    quiet: bool,
     /// Path to minishell executable
     #[arg(short, long, default_value = "../minishell")]
-    program: PathBuf,
+    minishell: PathBuf,
     /// Path to bash executable
     #[arg(long, default_value = "/usr/bin/bash")]
     bash: PathBuf,
@@ -35,35 +55,31 @@ struct Cli {
     #[arg(long)]
     bash_posix: bool,
     /// Use valgrind to check for memory leaks
-    #[arg(short = 'm', long)]
+    #[arg(short, long)]
     leak_check: bool,
-    ///// Check for correct error messages
-    //#[arg(short, long)]
-    //error_check: bool,
-    /// Path to tests csv file
-    #[arg(short, long, default_value = DEFAULT_TESTS_PATH)]
-    tests: PathBuf,
+    /// Check for correct error messages
+    #[arg(short, long)]
+    error_check: bool,
     /// Ignore the ignore list
     #[arg(short = 'i', long)]
     no_ignore: bool,
-    /// Enable isolation with bubblewrap
+    /// Use bubblewrap to isolate tests in a sandbox (provide path to executable)
     #[arg(short, long)]
-    bubblewrap: Option<PathBuf>,
+    bwrap: Option<PathBuf>,
+
+    /// Paths to tests csv files
+    #[arg(required = true)]
+    tests: Vec<PathBuf>,
 }
 
-#[derive(Subcommand)]
-enum Subcommands {
-    /// Import emtran's test (default source can be found at https://github.com/vietdu91/42_minishell)
-    ImportEmtran {
-        #[command(flatten)]
-        source: ImportSourceArgs,
-        /// Output file
-        #[arg(short, long, default_value = DEFAULT_TESTS_PATH)]
-        output: PathBuf,
-        /// Number of lines before first test
-        #[arg(short = 's', long)]
-        header_size: Option<usize>,
-    },
+#[derive(Args)]
+/// Import emtran's test (default source at https://github.com/vietdu91/42_minishell)
+struct ImportEmtran {
+    #[command(flatten)]
+    source: ImportSourceArgs,
+    /// Number of lines before first test
+    #[arg(short = 's', long, default_value = "24")]
+    header_size: usize,
 }
 
 #[derive(Debug, Clone, Args)]
@@ -92,16 +108,16 @@ impl Debug for Error {
 
 fn main() -> Result<(), Error> {
     let cli = Cli::parse();
-
-    if let Some(subcommand) = &cli.subcommand {
-        match subcommand {
-            Subcommands::ImportEmtran {
-                source,
-                output,
-                header_size,
-            } => import_emtran(&source.into(), output, header_size).map_err(Into::into),
+    match &cli.command {
+        Subcommands::Run(cli) => {
+            for file in &cli.tests {
+                run_tests(file, cli)?;
+            }
         }
-    } else {
-        run_tests(&cli).map_err(Into::into)
+        Subcommands::ImportEmtran(ImportEmtran {
+            source,
+            header_size,
+        }) => import_emtran(&source.into(), *header_size)?,
     }
+    Ok(())
 }
