@@ -62,39 +62,48 @@ pub fn run_tests(file_path: &Path, cli: &Run) -> Result<(), RunError> {
     println!("Running tests from {file_path:?}");
 
     fs::create_dir(base_path.join(TMP_DIR)).ok();
-    for test in tests.iter() {
-        env::set_current_dir(base_path.join(TMP_DIR)).map_err(RunError::SetCurrentDir)?;
-        let mut output = vec![];
-        let is_success = run_test(test, cli, &base_path, &mut output);
-        let mut err = None;
-        match is_success {
-            Ok(true) => {
-                passed += 1;
-                if !cli.quiet {
-                    println!("{}", String::from_utf8_lossy(&output).green());
+    let res = tests
+        .iter()
+        .try_for_each(|test| -> Result<(), Option<RunError>> {
+            env::set_current_dir(base_path.join(TMP_DIR))
+                .map_err(RunError::SetCurrentDir)
+                .map_err(Option::from)?;
+            let mut output = vec![];
+            let is_success = run_test(test, cli, &base_path, &mut output);
+            let mut err = None;
+            match is_success {
+                Ok(true) => {
+                    passed += 1;
+                    if !cli.quiet {
+                        println!("{}", String::from_utf8_lossy(&output).green());
+                    }
+                    if cli.one {
+                        return Err(None);
+                    }
                 }
-                if cli.one {
-                    break;
+                Ok(false) => {
+                    failed += 1;
+                    println!("{}", String::from_utf8_lossy(&output).red());
+                    if cli.one || !cli.keep_going {
+                        return Err(None);
+                    }
                 }
-            }
-            Ok(false) => {
-                failed += 1;
-                println!("{}", String::from_utf8_lossy(&output).red());
-                if cli.one || !cli.keep_going {
-                    break;
+                Err(RunError::Exec(err)) => {
+                    println!("{}", String::from_utf8_lossy(&output).red());
+                    println!("{}", format!("{err}").red());
+                    println!("{}", "########################".red());
+                        return Err(None);
                 }
+                Err(e) => err = Some(e),
             }
-            Err(RunError::Exec(err)) => {
-                println!("{}", String::from_utf8_lossy(&output).red());
-                println!("{}", format!("{err}").red());
-                println!("{}", "########################".red());
-                break;
+            if err.is_some() {
+                return Err(err);
             }
-            Err(e) => err = Some(e),
-        }
-        if let Some(err) = err {
-            return Err(err);
-        }
+            Ok(())
+        });
+
+    if let Err(Some(err)) = res {
+        return Err(err)
     }
 
     println!(
