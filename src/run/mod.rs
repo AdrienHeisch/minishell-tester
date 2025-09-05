@@ -1,7 +1,6 @@
 mod exec;
 mod parse;
 
-use crate::test::Test;
 use crate::Run;
 use colored::Colorize;
 use exec::{exec_test, ExecError};
@@ -27,20 +26,6 @@ pub enum RunError {
 
 const TMP_DIR: &str = "tmp";
 
-fn run_test(
-    test: &Test,
-    cli: &Run,
-    base_path: &Path,
-    output: &mut impl io::Write,
-) -> Result<bool, RunError> {
-    let current_dir = env::current_dir().map_err(RunError::CurrentDir)?;
-    let subdir = current_dir.join(format!("{}", test.id));
-    println!("subdir: {subdir:?}");
-    fs::create_dir(&subdir).map_err(RunError::CreateDir)?;
-    env::set_current_dir(&subdir).map_err(RunError::SetCurrentDir)?;
-    exec_test(test, cli, base_path, output).map_err(Into::into)
-}
-
 #[derive(Default)]
 enum TestRes {
     #[default]
@@ -51,20 +36,11 @@ enum TestRes {
 
 pub fn run_tests(file_path: &Path, cli: &Run) -> Result<(), RunError> {
     let base_path = env::current_dir().map_err(RunError::CurrentDir)?;
-    // macro_rules! reset_path_on_err {
-    //     ($e:expr, $err:expr) => {
-    //         $e.map_err($err).map_err(|err| {
-    //             env::set_current_dir(path.join(TMP_DIR))
-    //                 .map_err(RunError::SetCurrentDir)
-    //                 .err()
-    //                 .unwrap_or(err)
-    //         })
-    //     };
-    // }
-
     let tests_path = base_path.join(file_path);
-    let (tests, ignored) = parse_tests(&tests_path, cli)?;
+    let tmp_path = base_path.join(TMP_DIR);
+    fs::create_dir(base_path.join(TMP_DIR)).map_err(RunError::CreateDir)?;
 
+    let (tests, ignored) = parse_tests(&tests_path, cli)?;
     let mut tests = tests
         .into_iter()
         .map(|test| (test, TestRes::None))
@@ -73,15 +49,14 @@ pub fn run_tests(file_path: &Path, cli: &Run) -> Result<(), RunError> {
     println!();
     println!("Running tests from {file_path:?}");
 
-    fs::create_dir(base_path.join(TMP_DIR)).ok();
     let res = tests.iter_mut().try_for_each(
         |(ref test, ref mut res)| -> Result<(), Option<RunError>> {
-            env::set_current_dir(base_path.join(TMP_DIR))
-                .map_err(RunError::SetCurrentDir)
-                .map_err(Option::from)?;
+            let exec_path = tmp_path.join(format!("{}", test.id));
+            fs::create_dir(&exec_path).map_err(RunError::CreateDir)?;
+            println!("exec_path: {exec_path:?}");
             let mut output = vec![];
-            let is_success = run_test(test, cli, &base_path, &mut output);
-            let mut err = None;
+            let is_success =
+                exec_test(test, cli, &base_path, &exec_path, &mut output);
             match is_success {
                 Ok(true) => {
                     *res = TestRes::Passed;
@@ -99,16 +74,12 @@ pub fn run_tests(file_path: &Path, cli: &Run) -> Result<(), RunError> {
                         return Err(None);
                     }
                 }
-                Err(RunError::Exec(err)) => {
+                Err(err) => {
                     println!("{}", String::from_utf8_lossy(&output).red());
                     println!("{}", format!("{err}").red());
                     println!("{}", "########################".red());
                     return Err(None);
                 }
-                Err(e) => err = Some(e),
-            }
-            if err.is_some() {
-                return Err(err);
             }
             Ok(())
         },
@@ -135,7 +106,6 @@ pub fn run_tests(file_path: &Path, cli: &Run) -> Result<(), RunError> {
         format!("{} not run", tests.len() - passed - failed).white(),
     );
     fs::remove_dir_all(base_path.join(TMP_DIR)).map_err(RunError::ClearCurrentDir)?;
-    env::set_current_dir(base_path).map_err(RunError::SetCurrentDir)?;
 
     Ok(())
 }

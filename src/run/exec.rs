@@ -1,7 +1,6 @@
 use crate::{test::Test, Run};
 use regex::Regex;
 use std::{
-    env,
     ffi::OsStr,
     fs,
     io::{self, Write},
@@ -11,8 +10,16 @@ use std::{
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-#[error("Error during test execution: {0}")]
+#[error("{0}")]
 pub enum ExecError {
+    Setup(#[from] SetupError),
+    #[error("Error during test execution: {0}")]
+    Io(#[from] io::Error),
+}
+
+#[derive(Debug, Error)]
+#[error("Error during setup: {0}")]
+pub enum SetupError {
     Io(#[from] io::Error),
 }
 
@@ -23,19 +30,18 @@ fn join_path_if_relative(base: &Path, path: &Path) -> PathBuf {
     }
 }
 
-fn setup_test(dir: &Path, is_bwrap: bool) -> Result<(), ExecError> {
-    fs::remove_dir_all(dir)?;
-    fs::create_dir(dir)?;
-    env::set_current_dir(dir)?;
+fn setup_test(exec_path: &Path, is_bwrap: bool) -> Result<(), SetupError> {
+    let mut exec_path = exec_path.to_owned();
+    fs::remove_dir_all(&exec_path)?;
+    fs::create_dir(&exec_path)?;
     if is_bwrap {
-        fs::create_dir(".bin")?;
-        fs::create_dir("root")?;
-        env::set_current_dir("root")?;
+        fs::create_dir(exec_path.join(".bin"))?;
+        exec_path = exec_path.join("root");
+        fs::create_dir(&exec_path)?;
     }
-    fs::File::create_new("a")?.write_all(b"file a\n")?;
-    fs::File::create_new("b")?.write_all(b"file b\n")?;
-    fs::File::create_new("c")?.write_all(b"file c\n")?;
-    env::set_current_dir(dir)?;
+    fs::File::create_new(exec_path.join("a"))?.write_all(b"file a\n")?;
+    fs::File::create_new(exec_path.join("b"))?.write_all(b"file b\n")?;
+    fs::File::create_new(exec_path.join("c"))?.write_all(b"file c\n")?;
     Ok(())
 }
 
@@ -79,11 +85,12 @@ fn exec(
     options: &[&str],
     leak_check: bool,
     bwrap: Option<&Path>,
+    exec_path: &Path,
 ) -> Result<Output, ExecError> {
     let mut command = if let Some(bwrap) = bwrap {
         let mut command = Command::new(bwrap);
         command
-            .args(["--bind", ".", "/"])
+            .args(["--bind", &exec_path.to_string_lossy(), "/"])
             .args(["--proc", "/proc"])
             .args(["--dev", "/dev"])
             .args(["--ro-bind", "/usr", "/usr"])
@@ -141,13 +148,17 @@ fn exec(
     Ok(output)
 }
 
-fn exec_minishell(test: &Test, cli: &Run, base_path: &Path) -> Result<Output, ExecError> {
+fn exec_minishell(
+    test: &Test,
+    cli: &Run,
+    base_path: &Path,
+    exec_path: &Path,
+) -> Result<Output, ExecError> {
     let program_path = join_path_if_relative(base_path, &cli.minishell);
-    let current_dir = env::current_dir()?;
 
-    setup_test(&current_dir, cli.bwrap.is_some())?;
+    setup_test(exec_path, cli.bwrap.is_some())?;
     if cli.bwrap.is_some() {
-        fs::copy(&program_path, current_dir.join(".bin/minishell")).unwrap();
+        fs::copy(&program_path, exec_path.join(".bin/minishell")).unwrap();
     }
     exec(
         if cli.bwrap.is_some() {
@@ -162,6 +173,7 @@ fn exec_minishell(test: &Test, cli: &Run, base_path: &Path) -> Result<Output, Ex
             .as_deref()
             .map(|path| join_path_if_relative(base_path, path))
             .as_deref(),
+        exec_path,
     )
 }
 
@@ -172,11 +184,15 @@ fn adjust_bash_output(bytes: &mut Vec<u8>, bash_path: &Path) {
     *bytes = str.as_bytes().to_vec();
 }
 
-fn exec_bash(test: &Test, cli: &Run, base_path: &Path) -> Result<Output, ExecError> {
+fn exec_bash(
+    test: &Test,
+    cli: &Run,
+    base_path: &Path,
+    exec_path: &Path,
+) -> Result<Output, ExecError> {
     let bash_path = join_path_if_relative(base_path, &cli.bash);
-    let current_dir = env::current_dir()?;
 
-    setup_test(&current_dir, cli.bwrap.is_some())?;
+    setup_test(exec_path, cli.bwrap.is_some())?;
     let mut bash_options = Vec::new();
     if cli.bash_posix {
         bash_options.push("--posix");
@@ -190,6 +206,7 @@ fn exec_bash(test: &Test, cli: &Run, base_path: &Path) -> Result<Output, ExecErr
             .as_deref()
             .map(|path| join_path_if_relative(base_path, path))
             .as_deref(),
+        exec_path,
     )?;
     adjust_bash_output(&mut output.stdout, &bash_path);
     adjust_bash_output(&mut output.stderr, &bash_path);
@@ -200,13 +217,14 @@ pub fn exec_test(
     test: &Test,
     cli: &Run,
     base_path: &Path,
+    exec_path: &Path,
     output: &mut impl io::Write,
 ) -> Result<bool, ExecError> {
     writeln!(output)?;
     writeln!(output, "##### TEST {:>7} #####", test.id)?;
     writeln!(output, "{}", test.commands)?;
 
-    let minishell = exec_minishell(test, cli, base_path)
+    let minishell = exec_minishell(test, cli, base_path, exec_path)
         .inspect_err(|_| drop(writeln!(output, "#### FAILED TO RUN! ####")))?;
 
     if cli.leak_check {
@@ -218,7 +236,7 @@ pub fn exec_test(
         return Ok(true);
     }
 
-    let bash = exec_bash(test, cli, base_path)
+    let bash = exec_bash(test, cli, base_path, exec_path)
         .inspect_err(|_| drop(writeln!(output, "# BASH FAILED TO RUN! ##")))?;
 
     match (bash.status.code(), minishell.status.code()) {
