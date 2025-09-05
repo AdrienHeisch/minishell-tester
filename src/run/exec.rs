@@ -90,7 +90,7 @@ fn exec(
     let mut command = if let Some(bwrap) = bwrap {
         let mut command = Command::new(bwrap);
         command
-            .args(["--bind", &exec_path.to_string_lossy(), "/"])
+            .args(["--bind", ".", "/"])
             .args(["--proc", "/proc"])
             .args(["--dev", "/dev"])
             .args(["--ro-bind", "/usr", "/usr"])
@@ -119,6 +119,7 @@ fn exec(
         command.arg(&program);
     }
     command.args(options);
+    command.current_dir(exec_path);
     command
         .env_clear()
         .env("PATH", "/usr/bin")
@@ -156,12 +157,12 @@ fn exec_minishell(
 ) -> Result<Output, ExecError> {
     let program_path = join_path_if_relative(base_path, &cli.minishell);
 
-    setup_test(exec_path, cli.bwrap.is_some())?;
-    if cli.bwrap.is_some() {
+    setup_test(exec_path, cli.bwrap)?;
+    if cli.bwrap {
         fs::copy(&program_path, exec_path.join(".bin/minishell")).unwrap();
     }
     exec(
-        if cli.bwrap.is_some() {
+        if cli.bwrap {
             OsStr::new("/.bin/minishell")
         } else {
             OsStr::new(&program_path)
@@ -170,9 +171,7 @@ fn exec_minishell(
         &[],
         cli.leak_check,
         cli.bwrap
-            .as_deref()
-            .map(|path| join_path_if_relative(base_path, path))
-            .as_deref(),
+            .then_some(&join_path_if_relative(base_path, &cli.bwrap_path)),
         exec_path,
     )
 }
@@ -192,7 +191,7 @@ fn exec_bash(
 ) -> Result<Output, ExecError> {
     let bash_path = join_path_if_relative(base_path, &cli.bash);
 
-    setup_test(exec_path, cli.bwrap.is_some())?;
+    setup_test(exec_path, cli.bwrap)?;
     let mut bash_options = Vec::new();
     if cli.bash_posix {
         bash_options.push("--posix");
@@ -203,9 +202,7 @@ fn exec_bash(
         &bash_options,
         cli.leak_check,
         cli.bwrap
-            .as_deref()
-            .map(|path| join_path_if_relative(base_path, path))
-            .as_deref(),
+            .then_some(&join_path_if_relative(base_path, &cli.bwrap_path)),
         exec_path,
     )?;
     adjust_bash_output(&mut output.stdout, &bash_path);
@@ -224,6 +221,9 @@ pub fn exec_test(
     writeln!(output, "##### TEST {:>7} #####", test.id)?;
     writeln!(output, "{}", test.commands)?;
 
+    let bash = exec_bash(test, cli, base_path, exec_path)
+        .inspect_err(|_| drop(writeln!(output, "# BASH FAILED TO RUN! ##")))?;
+
     let minishell = exec_minishell(test, cli, base_path, exec_path)
         .inspect_err(|_| drop(writeln!(output, "#### FAILED TO RUN! ####")))?;
 
@@ -235,9 +235,6 @@ pub fn exec_test(
         writeln!(output, "#### NO LEAK FOUND #####")?;
         return Ok(true);
     }
-
-    let bash = exec_bash(test, cli, base_path, exec_path)
-        .inspect_err(|_| drop(writeln!(output, "# BASH FAILED TO RUN! ##")))?;
 
     match (bash.status.code(), minishell.status.code()) {
         (Some(bash_code), Some(minishell_code)) => {

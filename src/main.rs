@@ -63,10 +63,14 @@ struct Run {
     /// Ignore the ignore list
     #[arg(short = 'i', long)]
     no_ignore: bool,
-    /// Use bubblewrap to isolate tests in a sandbox (provide path to executable)
+    /// Use bubblewrap to isolate tests in a sandbox
     #[arg(short, long)]
-    bwrap: Option<PathBuf>,
-    /// Run tests in parallel (order will be random, might be unstable)
+    bwrap: bool,
+    /// Path to bwrap executable
+    #[arg(long, default_value = "/usr/bin/bwrap")]
+    bwrap_path: PathBuf,
+    /// Run tests in parallel (random order, needs bubblewrap). Some tests might fail when this is
+    /// enabled, double check with normal iteration. -pbqk flags recommended
     #[arg(short, long)]
     parallel: bool,
 
@@ -113,6 +117,9 @@ fn main() -> Result<(), Error> {
     let cli = Cli::parse();
     match &cli.command {
         Subcommands::Run(cli) => {
+            if cli.parallel && !cli.bwrap {
+                panic!("--parallel needs --bwrap !");
+            }
             for file in &cli.tests {
                 run_tests(file, cli)?;
             }

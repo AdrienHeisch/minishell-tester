@@ -38,6 +38,11 @@ pub fn run_tests(file_path: &Path, cli: &Run) -> Result<(), RunError> {
     let base_path = env::current_dir().map_err(RunError::CurrentDir)?;
     let tests_path = base_path.join(file_path);
     let tmp_path = base_path.join(TMP_DIR);
+    match fs::remove_dir_all(&tmp_path) {
+        Err(err) if err.kind() == io::ErrorKind::NotFound => (),
+        Err(err) => Err(RunError::ClearCurrentDir(err))?,
+        Ok(()) => (),
+    }
     fs::create_dir(base_path.join(TMP_DIR)).map_err(RunError::CreateDir)?;
 
     let (tests, ignored) = parse_tests(&tests_path, cli)?;
@@ -57,25 +62,26 @@ pub fn run_tests(file_path: &Path, cli: &Run) -> Result<(), RunError> {
         match is_success {
             Ok(true) => {
                 *res = TestRes::Passed;
+                fs::remove_dir_all(&exec_path).map_err(RunError::ClearCurrentDir)?;
                 if !cli.quiet {
                     println!("{}", String::from_utf8_lossy(&output).green());
                 }
                 if cli.one {
-                    return Err(None);
+                    Err(None)?
                 }
             }
             Ok(false) => {
                 *res = TestRes::Failed;
                 println!("{}", String::from_utf8_lossy(&output).red());
                 if cli.one || !cli.keep_going {
-                    return Err(None);
+                    Err(None)?
                 }
             }
             Err(err) => {
                 println!("{}", String::from_utf8_lossy(&output).red());
                 println!("{}", format!("{err}").red());
                 println!("{}", "########################".red());
-                return Err(None);
+                Err(None)?
             }
         }
         Ok(())
@@ -91,8 +97,14 @@ pub fn run_tests(file_path: &Path, cli: &Run) -> Result<(), RunError> {
             .try_for_each(|(test, res)| run_test(test, res))
     };
 
+    match fs::remove_dir(&tmp_path) {
+        Err(err) if err.kind() == io::ErrorKind::DirectoryNotEmpty => (),
+        Err(err) => Err(RunError::ClearCurrentDir(err))?,
+        Ok(()) => (),
+    }
+
     if let Err(Some(err)) = res {
-        return Err(err);
+        Err(err)?
     }
 
     let passed = tests
@@ -111,7 +123,6 @@ pub fn run_tests(file_path: &Path, cli: &Run) -> Result<(), RunError> {
         format!("{ignored} ignored, ").yellow(),
         format!("{} not run", tests.len() - passed - failed).white(),
     );
-    fs::remove_dir_all(base_path.join(TMP_DIR)).map_err(RunError::ClearCurrentDir)?;
 
     Ok(())
 }
