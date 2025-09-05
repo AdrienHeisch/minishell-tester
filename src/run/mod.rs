@@ -41,6 +41,14 @@ fn run_test(
     exec_test(test, cli, base_path, output).map_err(Into::into)
 }
 
+#[derive(Default)]
+enum TestRes {
+    #[default]
+    None,
+    Failed,
+    Passed,
+}
+
 pub fn run_tests(file_path: &Path, cli: &Run) -> Result<(), RunError> {
     let base_path = env::current_dir().map_err(RunError::CurrentDir)?;
     // macro_rules! reset_path_on_err {
@@ -56,15 +64,18 @@ pub fn run_tests(file_path: &Path, cli: &Run) -> Result<(), RunError> {
 
     let tests_path = base_path.join(file_path);
     let (tests, ignored) = parse_tests(&tests_path, cli)?;
-    let (mut passed, mut failed) = (0usize, 0usize);
+
+    let mut tests = tests
+        .into_iter()
+        .map(|test| (test, TestRes::None))
+        .collect::<Vec<_>>();
 
     println!();
     println!("Running tests from {file_path:?}");
 
     fs::create_dir(base_path.join(TMP_DIR)).ok();
-    let res = tests
-        .iter()
-        .try_for_each(|test| -> Result<(), Option<RunError>> {
+    let res = tests.iter_mut().try_for_each(
+        |(ref test, ref mut res)| -> Result<(), Option<RunError>> {
             env::set_current_dir(base_path.join(TMP_DIR))
                 .map_err(RunError::SetCurrentDir)
                 .map_err(Option::from)?;
@@ -73,7 +84,7 @@ pub fn run_tests(file_path: &Path, cli: &Run) -> Result<(), RunError> {
             let mut err = None;
             match is_success {
                 Ok(true) => {
-                    passed += 1;
+                    *res = TestRes::Passed;
                     if !cli.quiet {
                         println!("{}", String::from_utf8_lossy(&output).green());
                     }
@@ -82,7 +93,7 @@ pub fn run_tests(file_path: &Path, cli: &Run) -> Result<(), RunError> {
                     }
                 }
                 Ok(false) => {
-                    failed += 1;
+                    *res = TestRes::Failed;
                     println!("{}", String::from_utf8_lossy(&output).red());
                     if cli.one || !cli.keep_going {
                         return Err(None);
@@ -92,7 +103,7 @@ pub fn run_tests(file_path: &Path, cli: &Run) -> Result<(), RunError> {
                     println!("{}", String::from_utf8_lossy(&output).red());
                     println!("{}", format!("{err}").red());
                     println!("{}", "########################".red());
-                        return Err(None);
+                    return Err(None);
                 }
                 Err(e) => err = Some(e),
             }
@@ -100,11 +111,21 @@ pub fn run_tests(file_path: &Path, cli: &Run) -> Result<(), RunError> {
                 return Err(err);
             }
             Ok(())
-        });
+        },
+    );
 
     if let Err(Some(err)) = res {
-        return Err(err)
+        return Err(err);
     }
+
+    let passed = tests
+        .iter()
+        .filter(|(_, res)| matches!(res, TestRes::Passed))
+        .count();
+    let failed = tests
+        .iter()
+        .filter(|(_, res)| matches!(res, TestRes::Failed))
+        .count();
 
     println!(
         "{}{}{}{}",
