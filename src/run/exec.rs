@@ -165,9 +165,10 @@ fn exec_minishell(test: &Test, cli: &Run, base_path: &Path) -> Result<Output, Ex
     )
 }
 
-fn adjust_bash_output(bytes: &mut Vec<u8>) {
-    let str = String::from_utf8_lossy(bytes).replace("/usr/bin/env", "env");
-    // str.replace("bash", "minishell");
+fn adjust_bash_output(bytes: &mut Vec<u8>, bash_path: &Path) {
+    let str = String::from_utf8_lossy(bytes)
+        .replace("/usr/bin/env", "env")
+        .replace(bash_path.to_str().unwrap_or("bash"), "minishell");
     *bytes = str.as_bytes().to_vec();
 }
 
@@ -181,7 +182,7 @@ fn exec_bash(test: &Test, cli: &Run, base_path: &Path) -> Result<Output, ExecErr
         bash_options.push("--posix");
     }
     let mut output = exec(
-        bash_path,
+        &bash_path,
         &test.commands,
         &bash_options,
         cli.leak_check,
@@ -190,8 +191,8 @@ fn exec_bash(test: &Test, cli: &Run, base_path: &Path) -> Result<Output, ExecErr
             .map(|path| join_path_if_relative(base_path, path))
             .as_deref(),
     )?;
-    adjust_bash_output(&mut output.stdout);
-    adjust_bash_output(&mut output.stderr);
+    adjust_bash_output(&mut output.stdout, &bash_path);
+    adjust_bash_output(&mut output.stderr, &bash_path);
     Ok(output)
 }
 
