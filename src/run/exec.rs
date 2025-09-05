@@ -5,7 +5,7 @@ use std::{
     ffi::OsStr,
     fs,
     io::{self, Write},
-    path::Path,
+    path::{Path, PathBuf},
     process::{Command, Output, Stdio},
 };
 use thiserror::Error;
@@ -13,7 +13,14 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 #[error("Error during test execution: {0}")]
 pub enum ExecError {
-    Io(#[from] io::Error)
+    Io(#[from] io::Error),
+}
+
+fn join_path_if_relative(base: &Path, path: &Path) -> PathBuf {
+    match path.is_absolute() {
+        true => path.to_owned(),
+        false => base.join(path),
+    }
 }
 
 fn setup_test(dir: &Path, is_bwrap: bool) -> Result<(), ExecError> {
@@ -21,9 +28,14 @@ fn setup_test(dir: &Path, is_bwrap: bool) -> Result<(), ExecError> {
     fs::create_dir(dir)?;
     env::set_current_dir(dir)?;
     if is_bwrap {
-        fs::create_dir("root");
-        fs::create_dir(".bin");
+        fs::create_dir(".bin")?;
+        fs::create_dir("root")?;
+        env::set_current_dir("root")?;
     }
+    fs::File::create_new("a")?.write_all(b"file a\n")?;
+    fs::File::create_new("b")?.write_all(b"file b\n")?;
+    fs::File::create_new("c")?.write_all(b"file c\n")?;
+    env::set_current_dir(dir)?;
     Ok(())
 }
 
@@ -107,6 +119,7 @@ fn exec(
         .env("HOME", "/home/maxitester")
         .env("SHELL", "/usr/bin/someshell")
         .env("TERM", "xterm-256color")
+        .env("UID", "1000")
         .env("SHLVL", "");
     command
         .stdin(Stdio::piped())
@@ -129,7 +142,7 @@ fn exec(
 }
 
 fn exec_minishell(test: &Test, cli: &Run, base_path: &Path) -> Result<Output, ExecError> {
-    let program_path = base_path.join(&cli.minishell);
+    let program_path = join_path_if_relative(base_path, &cli.minishell);
     let current_dir = env::current_dir()?;
 
     setup_test(&current_dir, cli.bwrap.is_some())?;
@@ -145,7 +158,10 @@ fn exec_minishell(test: &Test, cli: &Run, base_path: &Path) -> Result<Output, Ex
         &test.commands,
         &[],
         cli.leak_check,
-        cli.bwrap.as_deref(),
+        cli.bwrap
+            .as_deref()
+            .map(|path| join_path_if_relative(base_path, path))
+            .as_deref(),
     )
 }
 
@@ -155,8 +171,8 @@ fn adjust_bash_output(bytes: &mut Vec<u8>) {
     *bytes = str.as_bytes().to_vec();
 }
 
-fn exec_bash(test: &Test, cli: &Run) -> Result<Output, ExecError> {
-    let bash_path = &cli.bash;
+fn exec_bash(test: &Test, cli: &Run, base_path: &Path) -> Result<Output, ExecError> {
+    let bash_path = join_path_if_relative(base_path, &cli.bash);
     let current_dir = env::current_dir()?;
 
     setup_test(&current_dir, cli.bwrap.is_some())?;
@@ -169,7 +185,10 @@ fn exec_bash(test: &Test, cli: &Run) -> Result<Output, ExecError> {
         &test.commands,
         &bash_options,
         cli.leak_check,
-        cli.bwrap.as_deref(),
+        cli.bwrap
+            .as_deref()
+            .map(|path| join_path_if_relative(base_path, path))
+            .as_deref(),
     )?;
     adjust_bash_output(&mut output.stdout);
     adjust_bash_output(&mut output.stderr);
@@ -198,8 +217,8 @@ pub fn exec_test(
         return Ok(true);
     }
 
-    let bash =
-        exec_bash(test, cli).inspect_err(|_| drop(writeln!(output, "# BASH FAILED TO RUN! ##")))?;
+    let bash = exec_bash(test, cli, base_path)
+        .inspect_err(|_| drop(writeln!(output, "# BASH FAILED TO RUN! ##")))?;
 
     match (bash.status.code(), minishell.status.code()) {
         (Some(bash_code), Some(minishell_code)) => {

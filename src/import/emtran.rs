@@ -45,7 +45,10 @@ fn parse(reader: impl io::Read, header_size: usize) -> Result<Tests, ParseTestEr
             Some(str) if str.contains("[BONUS]") => &mut bonus,
             _ => match record.get(2) {
                 Some(str) if !str.is_empty() => &mut more,
-                _ => &mut mandatory,
+                _ => match record.get(1) {
+                    Some("$> echo $hola*") => &mut bonus,
+                    _ => &mut mandatory,
+                },
             },
         };
         let commands = record
@@ -54,8 +57,7 @@ fn parse(reader: impl io::Read, header_size: usize) -> Result<Tests, ParseTestEr
             .replace("(touche entrée)", "\n")
             .replace("[que des espaces]", "           ")
             .replace("[que des tabulations]", "\t\t\t\t\t\t\t\t")
-            .replace("$UID", "$SHELL")
-            .replace(" [$TERM],", " \"[$TERM]\",")
+            .replace("[$TERM]", "\"[$TERM]\"")
             .replace("sleep 3", "sleep 0");
         if [
             "Ctlr-",
