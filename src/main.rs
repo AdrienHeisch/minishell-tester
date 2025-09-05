@@ -66,6 +66,9 @@ struct Run {
     /// Use bubblewrap to isolate tests in a sandbox (provide path to executable)
     #[arg(short, long)]
     bwrap: Option<PathBuf>,
+    /// Run tests in parallel (order will be random, might be unstable)
+    #[arg(short, long)]
+    parallel: bool,
 
     /// Paths to tests csv files
     #[arg(required = true)]

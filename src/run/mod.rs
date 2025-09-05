@@ -1,10 +1,12 @@
 mod exec;
 mod parse;
 
+use crate::test::Test;
 use crate::Run;
 use colored::Colorize;
 use exec::{exec_test, ExecError};
 use parse::{parse_tests, ParseTestError};
+use rayon::prelude::*;
 use std::path::Path;
 use std::{env, fs, io};
 use thiserror::Error;
@@ -14,8 +16,6 @@ use thiserror::Error;
 pub enum RunError {
     #[error("Failed to get current directory: {0}")]
     CurrentDir(io::Error),
-    #[error("Failed to set current directory: {0}")]
-    SetCurrentDir(io::Error),
     #[error("Failed to create directory: {0}")]
     CreateDir(io::Error),
     #[error("Failed to clear current directory: {0}")]
@@ -49,41 +49,47 @@ pub fn run_tests(file_path: &Path, cli: &Run) -> Result<(), RunError> {
     println!();
     println!("Running tests from {file_path:?}");
 
-    let res = tests.iter_mut().try_for_each(
-        |(ref test, ref mut res)| -> Result<(), Option<RunError>> {
-            let exec_path = tmp_path.join(format!("{}", test.id));
-            fs::create_dir(&exec_path).map_err(RunError::CreateDir)?;
-            println!("exec_path: {exec_path:?}");
-            let mut output = vec![];
-            let is_success =
-                exec_test(test, cli, &base_path, &exec_path, &mut output);
-            match is_success {
-                Ok(true) => {
-                    *res = TestRes::Passed;
-                    if !cli.quiet {
-                        println!("{}", String::from_utf8_lossy(&output).green());
-                    }
-                    if cli.one {
-                        return Err(None);
-                    }
+    let run_test = |test: &Test, res: &mut TestRes| -> Result<(), Option<RunError>> {
+        let exec_path = tmp_path.join(format!("{}", test.id));
+        fs::create_dir(&exec_path).map_err(RunError::CreateDir)?;
+        let mut output = vec![];
+        let is_success = exec_test(test, cli, &base_path, &exec_path, &mut output);
+        match is_success {
+            Ok(true) => {
+                *res = TestRes::Passed;
+                if !cli.quiet {
+                    println!("{}", String::from_utf8_lossy(&output).green());
                 }
-                Ok(false) => {
-                    *res = TestRes::Failed;
-                    println!("{}", String::from_utf8_lossy(&output).red());
-                    if cli.one || !cli.keep_going {
-                        return Err(None);
-                    }
-                }
-                Err(err) => {
-                    println!("{}", String::from_utf8_lossy(&output).red());
-                    println!("{}", format!("{err}").red());
-                    println!("{}", "########################".red());
+                if cli.one {
                     return Err(None);
                 }
             }
-            Ok(())
-        },
-    );
+            Ok(false) => {
+                *res = TestRes::Failed;
+                println!("{}", String::from_utf8_lossy(&output).red());
+                if cli.one || !cli.keep_going {
+                    return Err(None);
+                }
+            }
+            Err(err) => {
+                println!("{}", String::from_utf8_lossy(&output).red());
+                println!("{}", format!("{err}").red());
+                println!("{}", "########################".red());
+                return Err(None);
+            }
+        }
+        Ok(())
+    };
+
+    let res = if cli.parallel {
+        tests
+            .par_iter_mut()
+            .try_for_each(|(test, res)| run_test(test, res))
+    } else {
+        tests
+            .iter_mut()
+            .try_for_each(|(test, res)| run_test(test, res))
+    };
 
     if let Err(Some(err)) = res {
         return Err(err);
