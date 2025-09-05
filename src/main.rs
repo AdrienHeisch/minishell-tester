@@ -10,7 +10,7 @@ use thiserror::Error;
 use url::Url;
 
 #[derive(Parser)]
-/// Maxitest : a minishell tester
+/// MAXITEST FOR MINISHELL
 ///
 /// Tests are stored in csv files. Use a spreadsheet editor for convenience. Use the example
 /// subcommand to have a look at the test format.

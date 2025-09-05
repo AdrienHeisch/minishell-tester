@@ -759,6 +759,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13dc2df351e3202783a1fe0d44375f7295ffb4049267b0f3018346dc122a1d94"
 
 [[package]]
+name = "maxitest"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "colored",
+ "csv",
+ "rayon",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_repr",
+ "thiserror",
+ "url",
+]
+
+[[package]]
 name = "memchr"
 version = "2.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1294,22 +1310,6 @@ dependencies = [
  "once_cell",
  "rustix",
  "windows-sys 0.60.2",
-]
-
-[[package]]
-name = "tester"
-version = "0.1.0"
-dependencies = [
- "clap",
- "colored",
- "csv",
- "rayon",
- "regex",
- "reqwest",
- "serde",
- "serde_repr",
- "thiserror",
- "url",
 ]
 
 [[package]]
