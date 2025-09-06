@@ -26,6 +26,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Subcommands {
+    Example,
     Run(Run),
     ImportEmtran(ImportEmtran),
 }
@@ -116,6 +117,7 @@ impl Debug for Error {
 fn main() -> Result<(), Error> {
     let cli = Cli::parse();
     match &cli.command {
+        Subcommands::Example => todo!(),
         Subcommands::Run(cli) => {
             if cli.parallel && !cli.bwrap {
                 panic!("--parallel needs --bwrap !");
