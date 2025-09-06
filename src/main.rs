@@ -3,9 +3,14 @@ mod run;
 mod test;
 
 use clap::{Args, Parser, Subcommand};
+use hotwatch::{
+    blocking::{Flow, Hotwatch},
+    notify::event::AccessKind,
+    Event, EventKind,
+};
 use import::import_emtran;
 use run::{run_tests, RunError};
-use std::{fmt::Debug, path::PathBuf};
+use std::{fmt::Debug, fs, io, path::PathBuf, time::Duration};
 use thiserror::Error;
 use url::Url;
 
@@ -31,7 +36,7 @@ enum Subcommands {
     ImportEmtran(ImportEmtran),
 }
 
-#[derive(Args)]
+#[derive(Clone, Args)]
 /// Run tests from listed files
 struct Run {
     /// Use this to skip tests
@@ -74,7 +79,9 @@ struct Run {
     /// enabled, double check with normal iteration. -pbqk flags recommended
     #[arg(short, long)]
     parallel: bool,
-
+    /// Watch minishell executable file and run tests on change
+    #[arg(short, long)]
+    watch: bool,
     /// Paths to tests csv files
     #[arg(required = true)]
     tests: Vec<PathBuf>,
@@ -106,6 +113,7 @@ struct ImportSourceArgs {
 enum Error {
     Run(#[from] RunError),
     Import(#[from] import::ImportError),
+    Watch(#[from] WatchError),
 }
 
 impl Debug for Error {
@@ -122,8 +130,14 @@ fn main() -> Result<(), Error> {
             if cli.parallel && !cli.bwrap {
                 panic!("--parallel needs --bwrap !");
             }
-            for file in &cli.tests {
-                run_tests(file, cli)?;
+            let run_test_files = {
+                let cli = cli.clone();
+                move || cli.tests.iter().try_for_each(|file| run_tests(file, &cli))
+            };
+            if cli.watch {
+                watch(cli, run_test_files)?;
+            } else {
+                run_test_files()?;
             }
         }
         Subcommands::ImportEmtran(ImportEmtran {
@@ -131,5 +145,56 @@ fn main() -> Result<(), Error> {
             header_size,
         }) => import_emtran(&source.into(), *header_size)?,
     }
+    Ok(())
+}
+
+#[derive(Debug, Error)]
+#[error("{0}")]
+enum WatchError {
+    #[error("Couldn't find minishell's parent directory")]
+    Parent,
+    Io(#[from] io::Error),
+    Watch(#[from] hotwatch::Error),
+}
+
+fn watch<F>(cli: &Run, run_test_files: F) -> Result<(), WatchError>
+where
+    F: 'static + Fn() -> Result<(), RunError>,
+{
+    let minishell_path = std::env::current_dir()?.join(&cli.minishell).canonicalize()?;
+    let dir_path = minishell_path.parent().ok_or(WatchError::Parent)?;
+    let hotwatch_hanlder = {
+        let minishell_path = minishell_path.clone();
+        move |event: Event| {
+            if !event.paths.iter().any(|path| path == &minishell_path) {
+                return Flow::Continue;
+            }
+            match event.kind {
+                EventKind::Access(AccessKind::Close(
+                    hotwatch::notify::event::AccessMode::Write,
+                )) => (),
+                _ => {
+                    return Flow::Continue;
+                }
+            }
+            match fs::exists(&minishell_path) {
+                Ok(true) => (),
+                Ok(false) => return Flow::Continue,
+                Err(err) => {
+                    eprintln!("{err}");
+                    return Flow::Exit;
+                }
+            }
+            if let Err(err) = run_test_files() {
+                eprintln!("{err}");
+                return Flow::Exit;
+            }
+            Flow::Continue
+        }
+    };
+    let mut hotwatch = Hotwatch::new_with_custom_delay(Duration::from_millis(100))?;
+    hotwatch.watch(dir_path, hotwatch_hanlder)?;
+    println!("Watching file {minishell_path:?}");
+    hotwatch.run();
     Ok(())
 }
