@@ -1,6 +1,7 @@
 mod import;
 mod run;
 mod test;
+mod watch;
 
 use clap::{Args, Parser, Subcommand};
 use hotwatch::{
@@ -13,6 +14,7 @@ use run::{run_tests, RunError};
 use std::{fmt::Debug, fs, io, path::PathBuf, time::Duration};
 use thiserror::Error;
 use url::Url;
+use watch::WatchError;
 
 #[derive(Parser)]
 /// MAXITEST FOR MINISHELL
@@ -135,7 +137,7 @@ fn main() -> Result<(), Error> {
                 move || cli.tests.iter().try_for_each(|file| run_tests(file, &cli))
             };
             if cli.watch {
-                watch(cli, run_test_files)?;
+                watch::blocking(cli, run_test_files)?;
             } else {
                 run_test_files()?;
             }
@@ -145,56 +147,5 @@ fn main() -> Result<(), Error> {
             header_size,
         }) => import_emtran(&source.into(), *header_size)?,
     }
-    Ok(())
-}
-
-#[derive(Debug, Error)]
-#[error("{0}")]
-enum WatchError {
-    #[error("Couldn't find minishell's parent directory")]
-    Parent,
-    Io(#[from] io::Error),
-    Watch(#[from] hotwatch::Error),
-}
-
-fn watch<F>(cli: &Run, run_test_files: F) -> Result<(), WatchError>
-where
-    F: 'static + Fn() -> Result<(), RunError>,
-{
-    let minishell_path = std::env::current_dir()?.join(&cli.minishell).canonicalize()?;
-    let dir_path = minishell_path.parent().ok_or(WatchError::Parent)?;
-    let hotwatch_hanlder = {
-        let minishell_path = minishell_path.clone();
-        move |event: Event| {
-            if !event.paths.iter().any(|path| path == &minishell_path) {
-                return Flow::Continue;
-            }
-            match event.kind {
-                EventKind::Access(AccessKind::Close(
-                    hotwatch::notify::event::AccessMode::Write,
-                )) => (),
-                _ => {
-                    return Flow::Continue;
-                }
-            }
-            match fs::exists(&minishell_path) {
-                Ok(true) => (),
-                Ok(false) => return Flow::Continue,
-                Err(err) => {
-                    eprintln!("{err}");
-                    return Flow::Exit;
-                }
-            }
-            if let Err(err) = run_test_files() {
-                eprintln!("{err}");
-                return Flow::Exit;
-            }
-            Flow::Continue
-        }
-    };
-    let mut hotwatch = Hotwatch::new_with_custom_delay(Duration::from_millis(100))?;
-    hotwatch.watch(dir_path, hotwatch_hanlder)?;
-    println!("Watching file {minishell_path:?}");
-    hotwatch.run();
     Ok(())
 }
