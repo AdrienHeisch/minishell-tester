@@ -155,7 +155,7 @@ fn exec_minishell(
     base_path: &Path,
     exec_path: &Path,
 ) -> Result<Output, ExecError> {
-    let program_path = join_path_if_relative(base_path, &cli.minishell);
+    let program_path = join_path_if_relative(base_path, &cli.exec_paths.minishell);
 
     setup_test(exec_path, cli.bwrap)?;
     if cli.bwrap {
@@ -171,7 +171,7 @@ fn exec_minishell(
         &[],
         cli.leak_check,
         cli.bwrap
-            .then_some(&join_path_if_relative(base_path, &cli.bwrap_path)),
+            .then_some(&join_path_if_relative(base_path, &cli.exec_paths.bwrap_path)),
         exec_path,
     )
 }
@@ -189,7 +189,7 @@ fn exec_bash(
     base_path: &Path,
     exec_path: &Path,
 ) -> Result<Output, ExecError> {
-    let bash_path = join_path_if_relative(base_path, &cli.bash);
+    let bash_path = join_path_if_relative(base_path, &cli.exec_paths.bash);
 
     setup_test(exec_path, cli.bwrap)?;
     let mut bash_options = Vec::new();
@@ -202,7 +202,7 @@ fn exec_bash(
         &bash_options,
         cli.leak_check,
         cli.bwrap
-            .then_some(&join_path_if_relative(base_path, &cli.bwrap_path)),
+            .then_some(&join_path_if_relative(base_path, &cli.exec_paths.bwrap_path)),
         exec_path,
     )?;
     adjust_bash_output(&mut output.stdout, &bash_path);

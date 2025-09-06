@@ -1,13 +1,13 @@
 mod exec;
 mod parse;
 
-use crate::test::Test;
+pub use parse::parse_tests;
+
+use crate::{show, test::Test};
 use crate::Run;
-use colored::Colorize;
 use exec::{exec_test, ExecError};
-use parse::{parse_tests, ParseTestError};
+use parse::ParseTestError;
 use rayon::prelude::*;
-use std::path::Path;
 use std::{env, fs, io};
 use thiserror::Error;
 
@@ -27,16 +27,16 @@ pub enum RunError {
 const TMP_DIR: &str = "tmp";
 
 #[derive(Default)]
-enum TestRes {
+pub enum TestResult {
     #[default]
     None,
-    Failed,
-    Passed,
+    Error(String),
+    Failed(String),
+    Passed(String),
 }
 
-pub fn run_tests(file_path: &Path, cli: &Run) -> Result<(), RunError> {
+pub fn run_tests(tests: &[Test], cli: &Run, do_show: bool) -> Result<Vec<TestResult>, RunError> {
     let base_path = env::current_dir().map_err(RunError::CurrentDir)?;
-    let tests_path = base_path.join(file_path);
     let tmp_path = base_path.join(TMP_DIR);
     match fs::remove_dir_all(&tmp_path) {
         Err(err) if err.kind() == io::ErrorKind::NotFound => (),
@@ -45,42 +45,43 @@ pub fn run_tests(file_path: &Path, cli: &Run) -> Result<(), RunError> {
     }
     fs::create_dir(base_path.join(TMP_DIR)).map_err(RunError::CreateDir)?;
 
-    let (tests, ignored) = parse_tests(&tests_path, cli)?;
     let mut tests = tests
-        .into_iter()
-        .map(|test| (test, TestRes::None))
+        .iter()
+        .map(|test| (test, TestResult::None))
         .collect::<Vec<_>>();
 
-    println!();
-    println!("Running tests from {file_path:?}");
-
-    let run_test = |test: &Test, res: &mut TestRes| -> Result<(), Option<RunError>> {
+    let run_test = |test: &Test, res: &mut TestResult| -> Result<(), Option<RunError>> {
         let exec_path = tmp_path.join(format!("{}", test.id));
         fs::create_dir(&exec_path).map_err(RunError::CreateDir)?;
         let mut output = vec![];
         let is_success = exec_test(test, cli, &base_path, &exec_path, &mut output);
+        let output = String::from_utf8_lossy(&output);
         match is_success {
             Ok(true) => {
-                *res = TestRes::Passed;
-                fs::remove_dir_all(&exec_path).map_err(RunError::ClearCurrentDir)?;
-                if !cli.quiet {
-                    println!("{}", String::from_utf8_lossy(&output).green());
+                *res = TestResult::Passed(output.to_string());
+                if do_show {
+                    show(cli, res, |res| println!("{res}"));
                 }
+                fs::remove_dir_all(&exec_path).map_err(RunError::ClearCurrentDir)?;
                 if cli.one {
                     Err(None)?
                 }
             }
             Ok(false) => {
-                *res = TestRes::Failed;
-                println!("{}", String::from_utf8_lossy(&output).red());
+                *res = TestResult::Failed(output.to_string());
+                if do_show {
+                    show(cli, res, |res| println!("{res}"));
+                }
                 if cli.one || !cli.keep_going {
                     Err(None)?
                 }
             }
             Err(err) => {
-                println!("{}", String::from_utf8_lossy(&output).red());
-                println!("{}", format!("{err}").red());
-                println!("{}", "########################".red());
+                let err = format!("{output}\n{err}\n########################");
+                *res = TestResult::Error(err);
+                if do_show {
+                    show(cli, res, |res| println!("{res}"));
+                }
                 Err(None)?
             }
         }
@@ -107,22 +108,5 @@ pub fn run_tests(file_path: &Path, cli: &Run) -> Result<(), RunError> {
         Err(err)?
     }
 
-    let passed = tests
-        .iter()
-        .filter(|(_, res)| matches!(res, TestRes::Passed))
-        .count();
-    let failed = tests
-        .iter()
-        .filter(|(_, res)| matches!(res, TestRes::Failed))
-        .count();
-
-    println!(
-        "{}{}{}{}",
-        format!("{passed} passed, ").green(),
-        format!("{failed} failed, ").red(),
-        format!("{ignored} ignored, ").yellow(),
-        format!("{} not run", tests.len() - passed - failed).white(),
-    );
-
-    Ok(())
+    Ok(tests.into_iter().map(|(_, res)| res).collect())
 }

@@ -1,17 +1,14 @@
 mod import;
 mod run;
 mod test;
+mod tui;
 mod watch;
 
 use clap::{Args, Parser, Subcommand};
-use hotwatch::{
-    blocking::{Flow, Hotwatch},
-    notify::event::AccessKind,
-    Event, EventKind,
-};
-use import::import_emtran;
-use run::{run_tests, RunError};
-use std::{fmt::Debug, fs, io, path::PathBuf, time::Duration};
+use colored::Colorize;
+use import::{import_emtran, ImportError};
+use run::{parse_tests, run_tests, RunError, TestResult};
+use std::{fmt::Debug, path::PathBuf};
 use thiserror::Error;
 use url::Url;
 use watch::WatchError;
@@ -35,12 +32,28 @@ struct Cli {
 enum Subcommands {
     Example,
     Run(Run),
+    Tui(ExecPaths),
     ImportEmtran(ImportEmtran),
 }
 
-#[derive(Clone, Args)]
+#[derive(Clone, Default, Args)]
+struct ExecPaths {
+    /// Path to minishell executable
+    #[arg(short, long, default_value = "../minishell")]
+    minishell: PathBuf,
+    /// Path to bash executable
+    #[arg(long, default_value = "/usr/bin/bash")]
+    bash: PathBuf,
+    /// Path to bwrap executable
+    #[arg(long, default_value = "/usr/bin/bwrap")]
+    bwrap_path: PathBuf,
+}
+
+#[derive(Clone, Default, Args)]
 /// Run tests from listed files
 struct Run {
+    #[command(flatten)]
+    exec_paths: ExecPaths,
     /// Use this to skip tests
     #[arg(short, long, default_value = "0")]
     start: usize,
@@ -53,12 +66,6 @@ struct Run {
     /// Don't show passed tests
     #[arg(short, long)]
     quiet: bool,
-    /// Path to minishell executable
-    #[arg(short, long, default_value = "../minishell")]
-    minishell: PathBuf,
-    /// Path to bash executable
-    #[arg(long, default_value = "/usr/bin/bash")]
-    bash: PathBuf,
     /// Run bash as bash --posix
     #[arg(long)]
     bash_posix: bool,
@@ -74,9 +81,6 @@ struct Run {
     /// Use bubblewrap to isolate tests in a sandbox
     #[arg(short, long)]
     bwrap: bool,
-    /// Path to bwrap executable
-    #[arg(long, default_value = "/usr/bin/bwrap")]
-    bwrap_path: PathBuf,
     /// Run tests in parallel (random order, needs bubblewrap). Some tests might fail when this is
     /// enabled, double check with normal iteration. -pbqk flags recommended
     #[arg(short, long)]
@@ -114,7 +118,7 @@ struct ImportSourceArgs {
 #[error("{0}")]
 enum Error {
     Run(#[from] RunError),
-    Import(#[from] import::ImportError),
+    Import(#[from] ImportError),
     Watch(#[from] WatchError),
 }
 
@@ -134,7 +138,16 @@ fn main() -> Result<(), Error> {
             }
             let run_test_files = {
                 let cli = cli.clone();
-                move || cli.tests.iter().try_for_each(|file| run_tests(file, &cli))
+                move || {
+                    cli.tests.iter().try_for_each(|file| {
+                        println!();
+                        println!("Running tests from {file:?}");
+                        let (tests, ignored) = parse_tests(file, &cli)?;
+                        let results = run_tests(&tests, &cli, true)?;
+                        println!("{}", recap(tests.len(), ignored, &results));
+                        Ok(())
+                    })
+                }
             };
             if cli.watch {
                 watch::blocking(cli, run_test_files)?;
@@ -142,10 +155,37 @@ fn main() -> Result<(), Error> {
                 run_test_files()?;
             }
         }
+        Subcommands::Tui(exec_paths) => {
+            tui::run(exec_paths.clone()).unwrap();
+        }
         Subcommands::ImportEmtran(ImportEmtran {
             source,
             header_size,
         }) => import_emtran(&source.into(), *header_size)?,
     }
     Ok(())
+}
+
+fn show(cli: &Run, res: &TestResult, mut f: impl FnMut(&str)) {
+    match res {
+        TestResult::Error(out) | TestResult::Failed(out) => f(&format!("{}", out.red())),
+        TestResult::Passed(out) if !cli.quiet => f(&format!("{}", out.green())),
+        _ => (),
+    }
+}
+
+fn recap(n_tests: usize, ignored: usize, results: &[TestResult]) -> String {
+    let (passed, failed) = results.iter().fold((0, 0), |(p, f), res| match res {
+        TestResult::None => (p, f),
+        TestResult::Error(_) => (p, f),
+        TestResult::Passed(_) => (p + 1, f),
+        TestResult::Failed(_) => (p, f + 1),
+    });
+    format!(
+        "{}{}{}{}",
+        format!("{passed} passed, ").green(),
+        format!("{failed} failed, ").red(),
+        format!("{ignored} ignored, ").yellow(),
+        format!("{} not run", n_tests - passed - failed).white(),
+    )
 }
