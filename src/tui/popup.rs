@@ -7,7 +7,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap},
 };
 
-#[derive(Debug, Default, Setters)]
+#[derive(Debug, Default, Clone, Setters)]
 pub struct Popup<'a> {
     #[setters(into)]
     title: Line<'a>,

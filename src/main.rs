@@ -16,8 +16,7 @@ use watch::WatchError;
 #[derive(Parser)]
 /// MAXITEST FOR MINISHELL
 ///
-/// Tests are stored in csv files. Use a spreadsheet editor for convenience. Use the example
-/// subcommand to have a look at the test format.
+/// Tests are stored in csv files. Use a spreadsheet editor for convenience.
 ///
 /// For any xxx.csv file, a xxx.ignore file can contain a list of test ids to ignore. One id per
 /// line, use # to add comments.
@@ -30,9 +29,13 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Subcommands {
+    /// Not available yet
     Example,
+    /// Run tests from listed files
     Run(Run),
+    /// Open in TUI mode
     Tui(ExecPaths),
+    /// Import emtran's test (default source at https://github.com/vietdu91/42_minishell)
     ImportEmtran(ImportEmtran),
 }
 
@@ -50,7 +53,6 @@ struct ExecPaths {
 }
 
 #[derive(Clone, Default, Args)]
-/// Run tests from listed files
 struct Run {
     #[command(flatten)]
     exec_paths: ExecPaths,
@@ -94,7 +96,6 @@ struct Run {
 }
 
 #[derive(Args)]
-/// Import emtran's test (default source at https://github.com/vietdu91/42_minishell)
 struct ImportEmtran {
     #[command(flatten)]
     source: ImportSourceArgs,

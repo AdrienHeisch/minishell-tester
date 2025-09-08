@@ -26,7 +26,7 @@ pub enum RunError {
 
 const TMP_DIR: &str = "tmp";
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub enum TestResult {
     #[default]
     None,
