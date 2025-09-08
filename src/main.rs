@@ -16,6 +16,9 @@ use watch::WatchError;
 #[derive(Parser)]
 /// MAXITEST FOR MINISHELL
 ///
+/// Feature highlight: sandboxing, parallel execution, watch for recompilation, TUI
+/// interface
+///
 /// Tests are stored in csv files. Use a spreadsheet editor for convenience.
 ///
 /// For any xxx.csv file, a xxx.ignore file can contain a list of test ids to ignore. One id per
@@ -35,7 +38,8 @@ enum Subcommands {
     Run(Run),
     /// Open in TUI mode
     Tui(ExecPaths),
-    /// Import emtran's test (default source at https://github.com/vietdu91/42_minishell)
+    /// Import emtran's test (default source at https://github.com/vietdu91/42_minishell, thank you
+    /// emtran !)
     ImportEmtran(ImportEmtran),
 }
 

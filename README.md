@@ -1,3 +1,3 @@
 # README.md
 
-cargo run -- -h
+Check out the program's help subcommand.
