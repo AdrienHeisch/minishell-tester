@@ -16,6 +16,7 @@ use ratatui::{
     DefaultTerminal,
 };
 use std::{
+    collections::HashMap,
     env, fs, io,
     path::{Path, PathBuf},
     sync::{
@@ -50,7 +51,7 @@ pub fn run(exec_paths: ExecPaths) -> io::Result<()> {
         test_files,
         test_file_selected: 0,
         test_selected: 0,
-        results: vec![],
+        results: Default::default(),
         run_options,
     };
     let mut terminal = ratatui::init();
@@ -71,6 +72,20 @@ fn do_run_tests(tests: &[PathBuf], run_options: &Run) -> Result<FullRunResults, 
     Ok(out)
 }
 
+fn run_test_thread(
+    state: &State,
+    running_rx: &mut Option<Receiver<Result<Vec<(PathBuf, usize, Vec<TestResult>)>, String>>>,
+) {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let test_files = state.test_files.lock().unwrap().clone();
+    let run_options = state.run_options.clone();
+    thread::spawn(move || {
+        let res = do_run_tests(&test_files, &run_options).map_err(|err| format!("{err}"));
+        tx.send(res).ok();
+    });
+    *running_rx = Some(rx);
+}
+
 fn watch_thread(
     tests: Arc<Mutex<Vec<PathBuf>>>,
     run_options: &Run,
@@ -89,7 +104,7 @@ struct State {
     test_files: Arc<Mutex<Vec<PathBuf>>>,
     test_file_selected: usize,
     test_selected: usize,
-    results: Vec<TestResult>,
+    results: HashMap<PathBuf, Vec<TestResult>>,
     run_options: Run,
 }
 
@@ -110,6 +125,21 @@ fn process_tests_results(state: &State, res: Result<FullRunResults, String>) -> 
             true,
         ),
         Err(err) => (format!("Error while running tests: {err}"), false),
+    }
+}
+
+fn update_displayed_test(state: &State, ui: &mut UI) {
+    if let Some(selected) = state
+        .test_files
+        .lock()
+        .unwrap()
+        .get(state.test_file_selected)
+    {
+        if let Some(selected) = state.results.get(selected) {
+            if let Some(selected_result) = selected.get(state.test_selected) {
+                ui.update_test_display(selected_result);
+            }
+        }
     }
 }
 
@@ -148,21 +178,12 @@ fn run_loop(
                 match rx.try_recv() {
                     Ok(res) => {
                         if let Ok(res) = &res {
-                            let state: &mut State = &mut state;
-                            let ui: &mut UI = &mut ui;
-                            if let Some((_, _, results)) = res.iter().find(|(path, _, _)| {
-                                Some(path)
-                                    == state
-                                        .test_files
-                                        .lock()
-                                        .unwrap()
-                                        .get(state.test_file_selected)
-                            }) {
-                                state.results = results.clone();
-                                if let Some(selected) = state.results.get(state.test_selected) {
-                                    ui.update_test_display(selected)
-                                }
+                            for (path, _, results) in res {
+                                state.results.insert(path.clone(), results.clone());
                             }
+                            ui.test_list.state.select_first();
+                            state.test_selected = 0;
+                            update_displayed_test(&state, &mut ui);
                         }
                         let (content, color) = process_tests_results(&state, res);
                         ui.add_popup(content, color);
@@ -190,17 +211,22 @@ fn run_loop(
                         }
                         KeyCode::Char('j') => {
                             ui.test_list.state.scroll_down_by(1);
-                            state.test_selected = state.test_selected.saturating_add(1);
-                            if let Some(selected) = state.results.get(state.test_selected) {
-                                ui.update_test_display(selected)
-                            }
+                            let sel = state
+                                .test_files
+                                .lock()
+                                .unwrap()
+                                .get(state.test_file_selected)
+                                .cloned();
+                            state.test_selected = state.test_selected.saturating_add(1).min(
+                                sel.and_then(|sel| state.results.get(&sel).map(|r| r.len() - 1))
+                                    .unwrap_or_default(),
+                            );
+                            update_displayed_test(&state, &mut ui);
                         }
                         KeyCode::Char('k') => {
                             ui.test_list.state.scroll_up_by(1);
                             state.test_selected = state.test_selected.saturating_sub(1);
-                            if let Some(selected) = state.results.get(state.test_selected) {
-                                ui.update_test_display(selected)
-                            }
+                            update_displayed_test(&state, &mut ui);
                         }
                         KeyCode::Char('h') => {
                             state.test_file_selected = state.test_file_selected.saturating_sub(1);
@@ -215,8 +241,30 @@ fn run_loop(
                                     }),
                                 &state.run_options,
                             );
+                            ui.test_list.state.select_first();
+                            state.test_selected = 0;
+                            update_displayed_test(&state, &mut ui);
                         }
-
+                        KeyCode::Char('l') => {
+                            state.test_file_selected = state.test_file_selected.saturating_add(1);
+                            ui.test_list.set_filename(
+                                state
+                                    .test_files
+                                    .lock()
+                                    .unwrap()
+                                    .get(state.test_file_selected)
+                                    .map(|p| {
+                                        p.file_name().unwrap_or_default().to_string_lossy().into()
+                                    }),
+                                &state.run_options,
+                            );
+                            ui.test_list.state.select_first();
+                            state.test_selected = 0;
+                            update_displayed_test(&state, &mut ui);
+                        }
+                        KeyCode::Char('f') => {
+                            state.run_options.quiet = !state.run_options.quiet;
+                        }
                         _ => continue,
                     }
                 }
@@ -226,20 +274,6 @@ fn run_loop(
         terminal.draw(|frame| frame.render_widget(&mut ui, frame.area()))?;
         then = now;
     }
-}
-
-fn run_test_thread(
-    state: &State,
-    running_rx: &mut Option<Receiver<Result<Vec<(PathBuf, usize, Vec<TestResult>)>, String>>>,
-) {
-    let (tx, rx) = std::sync::mpsc::channel();
-    let test_files = state.test_files.lock().unwrap().clone();
-    let run_options = state.run_options.clone();
-    thread::spawn(move || {
-        let res = do_run_tests(&test_files, &run_options).map_err(|err| format!("{err}"));
-        tx.send(res).ok();
-    });
-    *running_rx = Some(rx);
 }
 
 #[derive(Default)]
@@ -290,8 +324,12 @@ impl UI {
 
 impl Widget for &mut UI {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let vlayout =
-            Layout::vertical(vec![Constraint::Length(1), Constraint::Fill(1)]).split(area);
+        let vlayout = Layout::vertical(vec![
+            Constraint::Length(1),
+            Constraint::Fill(1),
+            Constraint::Length(1),
+        ])
+        .split(area);
 
         let hlayout =
             Layout::horizontal(vec![Constraint::Fill(1), Constraint::Fill(1)]).split(vlayout[1]);
@@ -301,6 +339,8 @@ impl Widget for &mut UI {
         let test =
             Paragraph::new(self.test_result.as_str()).block(Block::new().borders(Borders::ALL));
         test.render(hlayout[1], buf);
+
+        Paragraph::new("[q] Quit [jk] Select test [hl] Select test file [⏎] Run tests").render(vlayout[2], buf);
 
         if let Some((content, color, _)) = self.popups.first() {
             let popup_area = Rect {

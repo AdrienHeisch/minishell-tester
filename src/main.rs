@@ -36,7 +36,7 @@ enum Subcommands {
     Example,
     /// Run tests from listed files
     Run(Run),
-    /// Open in TUI mode
+    /// Open in TUI mode (work in progress)
     Tui(ExecPaths),
     /// Import emtran's test (default source at https://github.com/vietdu91/42_minishell, thank you
     /// emtran !)
