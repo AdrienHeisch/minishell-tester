@@ -25,8 +25,13 @@ const BWRAP_EXEC: &[u8] = include_bytes!("../bin/bwrap");
 #[derive(Parser)]
 /// MAXITEST FOR MINISHELL
 ///
-/// Feature highlight: sandboxing, parallel execution, watch for recompilation, TUI
+/// Feature highlight: parallel execution, sandboxing, watch for recompilation, TUI
 /// interface
+///
+/// Recommended usage: Run ./maxitest run -bpqw *.csv in a dedicated terminal. This will run your
+/// tests every time you recompile your program, printing only the first few errors.
+///
+/// Don't forget to ./maxitest run --help
 ///
 /// Tests are stored in csv files. Use a spreadsheet editor for convenience.
 ///
@@ -34,6 +39,8 @@ const BWRAP_EXEC: &[u8] = include_bytes!("../bin/bwrap");
 /// line, use # to add comments.
 ///
 /// Try the import-emtran subcommand to get a few hundred tests.
+///
+/// -> ./maxitest import-emtran && ./maxitext run emtran_mandatory.csv
 struct Cli {
     #[command(subcommand)]
     command: Subcommands,
@@ -43,7 +50,8 @@ struct Cli {
 enum Subcommands {
     /// Not available yet
     Example,
-    /// Run tests from listed files
+    /// Run tests from listed files. Each test will be run with both minishell and bash, and
+    /// outputs will be compared
     Run(Run),
     /// Open in TUI mode (work in progress)
     Tui(ExecPaths),
@@ -60,7 +68,7 @@ struct ExecPaths {
     /// Path to bash executable
     #[arg(long, default_value = "/usr/bin/bash")]
     bash: PathBuf,
-    /// Path to bwrap executable
+    /// Path to bwrap executable. Will extract an embedded version if not found
     #[arg(long, default_value = "/usr/bin/bwrap")]
     bwrap_path: PathBuf,
 }
@@ -93,10 +101,11 @@ struct Run {
     /// Ignore the ignore list
     #[arg(short = 'i', long)]
     no_ignore: bool,
-    /// Use bubblewrap to isolate tests in a sandbox
+    /// Use bubblewrap to isolate tests in a sandbox. Enforces consistent environment, prevents
+    /// accidental file deletion
     #[arg(short, long)]
     bwrap: bool,
-    /// Run tests in parallel (random order, needs bubblewrap). -pbqk flags recommended. Known issue:
+    /// Run tests in parallel (random order, needs bubblewrap). Known issue:
     /// some tests might fail when this is enabled, double check with normal iteration.
     #[arg(short, long)]
     parallel: bool,
