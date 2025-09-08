@@ -8,10 +8,19 @@ use clap::{Args, Parser, Subcommand};
 use colored::Colorize;
 use import::{import_emtran, ImportError};
 use run::{parse_tests, run_tests, RunError, TestResult};
-use std::{fmt::Debug, path::PathBuf};
+use std::{
+    env,
+    fmt::Debug,
+    fs::{self, Permissions},
+    io,
+    os::unix::fs::PermissionsExt,
+    path::PathBuf,
+};
 use thiserror::Error;
 use url::Url;
 use watch::WatchError;
+
+const BWRAP_EXEC: &[u8] = include_bytes!("../bin/bwrap");
 
 #[derive(Parser)]
 /// MAXITEST FOR MINISHELL
@@ -87,8 +96,8 @@ struct Run {
     /// Use bubblewrap to isolate tests in a sandbox
     #[arg(short, long)]
     bwrap: bool,
-    /// Run tests in parallel (random order, needs bubblewrap). Some tests might fail when this is
-    /// enabled, double check with normal iteration. -pbqk flags recommended
+    /// Run tests in parallel (random order, needs bubblewrap). -pbqk flags recommended. Known issue:
+    /// some tests might fail when this is enabled, double check with normal iteration.
     #[arg(short, long)]
     parallel: bool,
     /// Watch minishell executable file and run tests on change
@@ -125,6 +134,8 @@ enum Error {
     Run(#[from] RunError),
     Import(#[from] ImportError),
     Watch(#[from] WatchError),
+    #[error("Failed to extract bwrap executable: {0}")]
+    Bwrap(io::Error),
 }
 
 impl Debug for Error {
@@ -133,11 +144,22 @@ impl Debug for Error {
     }
 }
 
+fn extract_bwrap(exec_paths: &mut ExecPaths) -> io::Result<()> {
+    let path = env::temp_dir().join("maxitest-bwrap");
+    fs::write(&path, BWRAP_EXEC)?;
+    fs::set_permissions(&path, Permissions::from_mode(0o0744))?;
+    exec_paths.bwrap_path = path;
+    Ok(())
+}
+
 fn main() -> Result<(), Error> {
     let cli = Cli::parse();
-    match &cli.command {
+    match cli.command {
         Subcommands::Example => todo!(),
-        Subcommands::Run(cli) => {
+        Subcommands::Run(mut cli) => {
+            if cli.bwrap && !cli.exec_paths.bwrap_path.exists() {
+                extract_bwrap(&mut cli.exec_paths).map_err(Error::Bwrap)?;
+            }
             if cli.parallel && !cli.bwrap {
                 panic!("--parallel needs --bwrap !");
             }
@@ -155,7 +177,7 @@ fn main() -> Result<(), Error> {
                 }
             };
             if cli.watch {
-                watch::blocking(cli, run_test_files)?;
+                watch::blocking(&cli, run_test_files)?;
             } else {
                 run_test_files()?;
             }
@@ -166,7 +188,7 @@ fn main() -> Result<(), Error> {
         Subcommands::ImportEmtran(ImportEmtran {
             source,
             header_size,
-        }) => import_emtran(&source.into(), *header_size)?,
+        }) => import_emtran(&(&source).into(), header_size)?,
     }
     Ok(())
 }

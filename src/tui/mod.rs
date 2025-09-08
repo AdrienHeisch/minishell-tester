@@ -1,7 +1,7 @@
 mod popup;
 
 use crate::{
-    recap,
+    extract_bwrap, recap,
     run::{parse_tests, run_tests, RunError, TestResult},
     show,
     test::Test,
@@ -37,10 +37,11 @@ fn find_test_files(path: &Path) -> io::Result<Vec<PathBuf>> {
         .collect())
 }
 
-pub fn run(exec_paths: ExecPaths) -> io::Result<()> {
+pub fn run(mut exec_paths: ExecPaths) -> io::Result<()> {
+    let bwrap = exec_paths.bwrap_path.exists() || extract_bwrap(&mut exec_paths).is_ok();
     let run_options = Run {
         exec_paths,
-        bwrap: true,
+        bwrap,
         parallel: true,
         keep_going: true,
         ..Default::default()
@@ -340,7 +341,8 @@ impl Widget for &mut UI {
             Paragraph::new(self.test_result.as_str()).block(Block::new().borders(Borders::ALL));
         test.render(hlayout[1], buf);
 
-        Paragraph::new("[q] Quit [jk] Select test [hl] Select test file [⏎] Run tests").render(vlayout[2], buf);
+        Paragraph::new("[q] Quit [jk] Select test [hl] Select test file [⏎] Run tests")
+            .render(vlayout[2], buf);
 
         if let Some((content, color, _)) = self.popups.first() {
             let popup_area = Rect {

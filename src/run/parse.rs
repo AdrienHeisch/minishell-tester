@@ -47,10 +47,10 @@ pub fn parse_tests(path: &Path, cli: &Run) -> Result<(Vec<Test>, usize), ParseTe
     let mut reader = csv::Reader::from_reader(File::open(path)?);
     let mut tests = vec![];
     let mut n_ignored_tests = 0;
-    for test in reader.deserialize::<Test>() {
-        let test = test?;
+    for (id, test) in reader.deserialize::<Test>().enumerate() {
+        let test = Test { id, ..test? };
         if test.id < cli.start {
-            continue ;
+            continue;
         }
         if ignore.contains(&test.id) {
             n_ignored_tests += 1;
