@@ -94,6 +94,7 @@ fn exec(
             .args(["--proc", "/proc"])
             .args(["--dev", "/dev"])
             .args(["--ro-bind", "/usr", "/usr"])
+            .args(["--ro-bind", "/bin", "/bin"])
             .args(["--ro-bind", "/lib64", "/lib64"])
             .args(["--chdir", "/root"])
             .arg("--unshare-all")
