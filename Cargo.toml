@@ -9,6 +9,9 @@ edition = "2021"
 strip = true
 lto = true
 
+[features]
+include-bwrap = []
+
 [dependencies]
 clap = { version = "4.5.46", features = ["derive"] }
 colored = "3.0.0"

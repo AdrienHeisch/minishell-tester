@@ -20,7 +20,11 @@ use thiserror::Error;
 use url::Url;
 use watch::WatchError;
 
-const BWRAP_EXEC: &[u8] = include_bytes!("../bin/bwrap");
+const BWRAP_EXEC: Option<&[u8]> = if cfg!(feature = "include-bwrap") {
+    Some(include_bytes!("/usr/bin/bwrap"))
+} else {
+    None
+};
 
 #[derive(Parser)]
 /// MAXITEST FOR MINISHELL
@@ -68,7 +72,8 @@ struct ExecPaths {
     /// Path to bash executable
     #[arg(long, default_value = "/usr/bin/bash")]
     bash: PathBuf,
-    /// Path to bwrap executable. Will extract an embedded version if not found
+    /// Path to bwrap executable. Will extract an embedded version if not found and feature
+    /// "embed-bwrap" was enabled at compilation
     #[arg(long, default_value = "/usr/bin/bwrap")]
     bwrap_path: PathBuf,
 }
@@ -154,10 +159,12 @@ impl Debug for Error {
 }
 
 fn extract_bwrap(exec_paths: &mut ExecPaths) -> io::Result<()> {
-    let path = env::temp_dir().join("maxitest-bwrap");
-    fs::write(&path, BWRAP_EXEC)?;
-    fs::set_permissions(&path, Permissions::from_mode(0o0744))?;
-    exec_paths.bwrap_path = path;
+    if let Some(bwrap) = BWRAP_EXEC {
+        let path = env::temp_dir().join("maxitest-bwrap");
+        fs::write(&path, bwrap)?;
+        fs::set_permissions(&path, Permissions::from_mode(0o0744))?;
+        exec_paths.bwrap_path = path;
+    }
     Ok(())
 }
 

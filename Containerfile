@@ -1,3 +1,4 @@
-FROM rust:alpine
+FROM rust:bookworm
 
-RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static
+RUN apt-get update
+RUN apt-get install -y openssl libssl-dev bubblewrap
