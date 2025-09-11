@@ -192,11 +192,10 @@ fn main() -> Result<(), Error> {
                     })
                 }
             };
+            run_test_files()?;
             if cli.watch {
                 watch::blocking(&cli, run_test_files)?;
-            } else {
-                run_test_files()?;
-            }
+            } 
         }
         Subcommands::Tui(exec_paths) => {
             tui::run(exec_paths.clone()).unwrap();
