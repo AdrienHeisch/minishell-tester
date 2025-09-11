@@ -51,14 +51,7 @@ fn parse(reader: impl io::Read, header_size: usize) -> Result<Tests, ParseTestEr
                 },
             },
         };
-        let commands = record
-            .get(1)
-            .unwrap_or("")
-            .replace("(touche entrée)", "\n")
-            .replace("[que des espaces]", "           ")
-            .replace("[que des tabulations]", "\t\t\t\t\t\t\t\t")
-            .replace("[$TERM]", "\"[$TERM]\"")
-            .replace("sleep 3", "sleep 0");
+        let commands = record.get(1).unwrap_or("");
         if [
             "Ctlr-",
             "env -i",
@@ -91,7 +84,14 @@ fn parse(reader: impl io::Read, header_size: usize) -> Result<Tests, ParseTestEr
                     .for_each(|line| lines.push(line.to_string()));
             }
         }
-        let commands = lines.join("\n");
+        let commands = lines
+            .join("\n")
+            .replace("(touche entrée)", "\n")
+            .replace("[que des espaces]", "           ")
+            .replace("[que des tabulations]", "\t\t\t\t\t\t\t\t")
+            .replace("[$TERM]", "\"[$TERM]\"")
+            .replace("sleep 3", "sleep 0")
+            .replace("vietdu91", "maxitester");
         let id = out.len();
         out.push(Test { id, commands });
     }
