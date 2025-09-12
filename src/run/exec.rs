@@ -162,7 +162,7 @@ fn exec_minishell(
     if cli.bwrap {
         fs::copy(&program_path, exec_path.join(".bin/minishell")).unwrap();
     }
-    exec(
+    let output = exec(
         if cli.bwrap {
             OsStr::new("/.bin/minishell")
         } else {
@@ -174,7 +174,11 @@ fn exec_minishell(
         cli.bwrap
             .then_some(&join_path_if_relative(base_path, &cli.exec_paths.bwrap_path)),
         exec_path,
-    )
+    );
+    if cli.bwrap {
+        fs::remove_file(exec_path.join(".bin/minishell")).unwrap();
+    }
+    output
 }
 
 fn adjust_bash_output(bytes: &mut Vec<u8>, bash_path: &Path) {
