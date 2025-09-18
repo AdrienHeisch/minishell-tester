@@ -279,6 +279,7 @@ fn run_loop(
 
 #[derive(Default)]
 struct UI {
+    #[allow(unused)]
     current_file: Option<String>,
     test_list: TestList,
     test_result: String,

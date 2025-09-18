@@ -4,8 +4,7 @@ pub mod zstenger;
 pub use emtran::import as import_emtran;
 pub use zstenger::import as import_zstenger;
 
-use reqwest::{blocking::Response, IntoUrl};
-use std::{fs, io, path::PathBuf};
+use std::{io, path::PathBuf};
 use thiserror::Error;
 use url::Url;
 

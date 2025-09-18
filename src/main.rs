@@ -62,6 +62,8 @@ enum Subcommands {
     /// Import emtran's test (default source at https://github.com/vietdu91/42_minishell, thank you
     /// emtran !)
     ImportEmtran(ImportEmtran),
+    /// Import zstenger's test (default source at https://github.com/zstenger93/42_minishell_tester, thank you
+    /// zstenger !)
     ImportZstenger(ImportEmtran),
 }
 
