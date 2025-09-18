@@ -76,6 +76,11 @@ struct ExecPaths {
     /// "embed-bwrap" was enabled at compilation
     #[arg(long, default_value = "/usr/bin/bwrap")]
     bwrap_path: PathBuf,
+    // TODO use these
+    // #[arg(long, default_value = "valgrind")]
+    // valgrind_path: PathBuf,
+    // #[arg(long, default_value = "funcheck")]
+    // funcheck_path: PathBuf,
 }
 
 #[derive(Clone, Default, Args)]
@@ -99,7 +104,10 @@ struct Run {
     bash_posix: bool,
     /// Use valgrind to check for memory leaks
     #[arg(short, long)]
-    leak_check: bool,
+    valgrind: bool,
+    /// Use valgrind to check for memory leaks
+    #[arg(short, long)]
+    funcheck: bool,
     /// Check for correct error messages
     #[arg(short, long)]
     error_check: bool,
@@ -178,6 +186,9 @@ fn main() -> Result<(), Error> {
             }
             if cli.parallel && !cli.bwrap {
                 panic!("--parallel needs --bwrap !");
+            }
+            if cli.valgrind && cli.funcheck {
+                panic!("--valgrind conflicts with --funcheck !");
             }
             let run_test_files = {
                 let cli = cli.clone();

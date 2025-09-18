@@ -83,7 +83,8 @@ fn exec(
     program: impl AsRef<OsStr>,
     test: &str,
     options: &[&str],
-    leak_check: bool,
+    valgrind: bool,
+    funcheck: bool,
     bwrap: Option<&Path>,
     exec_path: &Path,
 ) -> Result<Output, ExecError> {
@@ -91,32 +92,44 @@ fn exec(
         let mut command = Command::new(bwrap);
         command
             .args(["--bind", ".", "/"])
-            .args(["--proc", "/proc"])
             .args(["--dev", "/dev"])
             .args(["--ro-bind", "/usr", "/usr"])
             .args(["--ro-bind", "/bin", "/bin"])
             .args(["--ro-bind", "/lib64", "/lib64"])
+            .args(["--tmpfs", "/tmp"])
             .args(["--chdir", "/root"])
             .arg("--unshare-all")
             .arg("--die-with-parent")
             .arg("--new-session");
+        if valgrind {
+            command.args(["--proc", "/proc"]);
+        }
         command
-    } else if leak_check {
+    } else if valgrind {
         Command::new("valgrind")
+    } else if funcheck {
+        Command::new("funcheck")
     } else {
         Command::new(&program)
     };
-    if leak_check {
+    if valgrind {
         if bwrap.is_some() {
             command.arg("valgrind");
         }
         command.args([
             "--leak-check=full",
             "--show-leak-kinds=all",
-            "--error-exitcode=1",
-            "--exit-on-first-error=yes",
+            "--track-origins=yes",
+            "--track-fds=yes",
+            "--errors-for-leak-kinds=all",
+            "--error-exitcode=3", // TODO move 3 to const
+            "--suppressions=../../valgrind-suppressions",
         ]);
-    } else if bwrap.is_some() {
+    }
+    if funcheck && bwrap.is_some() {
+        command.arg("funcheck");
+    }
+    if valgrind || funcheck || bwrap.is_some() {
         command.arg(&program);
     }
     command.args(options);
@@ -159,20 +172,21 @@ fn exec_minishell(
     let program_path = join_path_if_relative(base_path, &cli.exec_paths.minishell);
 
     setup_test(exec_path, cli.bwrap)?;
-    if cli.bwrap {
-        fs::copy(&program_path, exec_path.join(".bin/minishell")).unwrap();
-    }
     exec(
         if cli.bwrap {
+            fs::copy(&program_path, exec_path.join(".bin/minishell")).unwrap();
             OsStr::new("/.bin/minishell")
         } else {
             OsStr::new(&program_path)
         },
         &test.commands,
         &[],
-        cli.leak_check,
-        cli.bwrap
-            .then_some(&join_path_if_relative(base_path, &cli.exec_paths.bwrap_path)),
+        cli.valgrind,
+        cli.funcheck,
+        cli.bwrap.then_some(&join_path_if_relative(
+            base_path,
+            &cli.exec_paths.bwrap_path,
+        )),
         exec_path,
     )
 }
@@ -201,9 +215,12 @@ fn exec_bash(
         &bash_path,
         &test.commands,
         &bash_options,
-        cli.leak_check,
-        cli.bwrap
-            .then_some(&join_path_if_relative(base_path, &cli.exec_paths.bwrap_path)),
+        cli.valgrind,
+        cli.funcheck,
+        cli.bwrap.then_some(&join_path_if_relative(
+            base_path,
+            &cli.exec_paths.bwrap_path,
+        )),
         exec_path,
     )?;
     adjust_bash_output(&mut output.stdout, &bash_path);
@@ -228,13 +245,50 @@ pub fn exec_test(
     let minishell = exec_minishell(test, cli, base_path, exec_path)
         .inspect_err(|_| drop(writeln!(output, "#### FAILED TO RUN! ####")))?;
 
-    if cli.leak_check {
-        if !minishell.status.success() {
-            writeln!(output, "##### MEMORY LEAK  #####")?;
-            return Ok(false);
+    if cli.valgrind {
+        match minishell.status.code() {
+            Some(3) => {
+                writeln!(output, "#### VALGRIND ERROR ####")?;
+                if !minishell.stdout.is_empty() {
+                    writeln!(output, "Output:")?;
+                    output.write_all(&minishell.stdout)?;
+                }
+                if !minishell.stderr.is_empty() {
+                    writeln!(output, "Error:")?;
+                    output.write_all(&minishell.stderr)?;
+                }
+                writeln!(output, "########################")?;
+                return Ok(false);
+            }
+            Some(_) => {
+                writeln!(output, "####### SUCCESS! #######")?;
+                return Ok(true); // DESIGN compare with bash instead of success ?
+            }
+            _ => (),
         }
-        writeln!(output, "#### NO LEAK FOUND #####")?;
-        return Ok(true);
+    }
+
+    if cli.funcheck {
+        match minishell.status.code() {
+            Some(0) => {
+                writeln!(output, "####### SUCCESS! #######")?;
+                return Ok(true); // DESIGN compare with bash instead of success ?
+            }
+            Some(_) => {
+                writeln!(output, "#### FUNCHECK ERROR ####")?;
+                if !minishell.stdout.is_empty() {
+                    writeln!(output, "Output:")?;
+                    output.write_all(&minishell.stdout)?;
+                }
+                if !minishell.stderr.is_empty() {
+                    writeln!(output, "Error:")?;
+                    output.write_all(&minishell.stderr)?;
+                }
+                writeln!(output, "########################")?;
+                return Ok(false);
+            }
+            _ => (),
+        }
     }
 
     match (bash.status.code(), minishell.status.code()) {
