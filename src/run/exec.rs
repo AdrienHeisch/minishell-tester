@@ -172,9 +172,11 @@ fn exec_minishell(
     let program_path = join_path_if_relative(base_path, &cli.exec_paths.minishell);
 
     setup_test(exec_path, cli.bwrap)?;
-    exec(
+    if cli.bwrap {
+        fs::copy(&program_path, exec_path.join(".bin/minishell")).unwrap();
+    }
+    let output = exec(
         if cli.bwrap {
-            fs::copy(&program_path, exec_path.join(".bin/minishell")).unwrap();
             OsStr::new("/.bin/minishell")
         } else {
             OsStr::new(&program_path)
@@ -188,7 +190,11 @@ fn exec_minishell(
             &cli.exec_paths.bwrap_path,
         )),
         exec_path,
-    )
+    );
+    if cli.bwrap {
+        fs::remove_file(exec_path.join(".bin/minishell")).unwrap();
+    }
+    output
 }
 
 fn adjust_bash_output(bytes: &mut Vec<u8>, bash_path: &Path) {
