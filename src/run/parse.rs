@@ -57,6 +57,9 @@ pub fn parse_tests(path: &Path, cli: &Run) -> Result<(Vec<Test>, usize), ParseTe
             continue;
         }
         tests.push(test);
+        if cli.one {
+            break;
+        }
     }
     Ok((tests, n_ignored_tests))
 }

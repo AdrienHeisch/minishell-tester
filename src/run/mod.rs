@@ -63,16 +63,13 @@ pub fn run_tests(tests: &[Test], cli: &Run, do_show: bool) -> Result<Vec<TestRes
                     show(cli, res, |res| println!("{res}"));
                 }
                 fs::remove_dir_all(&exec_path).map_err(RunError::ClearCurrentDir)?;
-                if cli.one {
-                    Err(None)?
-                }
             }
             Ok(false) => {
                 *res = TestResult::Failed(output.to_string());
                 if do_show {
                     show(cli, res, |res| println!("{res}"));
                 }
-                if cli.one || !cli.keep_going {
+                if !cli.keep_going {
                     Err(None)?
                 }
             }
