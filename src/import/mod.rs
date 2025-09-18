@@ -1,9 +1,13 @@
 pub mod emtran;
-pub use emtran::import as import_emtran;
-use url::Url;
+pub mod zstenger;
 
-use std::{io, path::PathBuf};
+pub use emtran::import as import_emtran;
+pub use zstenger::import as import_zstenger;
+
+use reqwest::{blocking::Response, IntoUrl};
+use std::{fs, io, path::PathBuf};
 use thiserror::Error;
+use url::Url;
 
 use crate::ImportSourceArgs;
 
@@ -29,17 +33,20 @@ pub enum ImportError {
 pub enum DownloadError {
     #[error("Failed to download tests file: {0}")]
     Reqwest(#[from] reqwest::Error),
+    #[error("Failed to parse url: {0}")]
+    UrlParse(#[from] url::ParseError),
     #[error("Failed to parse url")]
     InvalidUrl,
 }
 
 #[derive(Debug, Error)]
-#[error("{0}")]
+#[error("Failed to parse tests file: {0}")]
 pub enum ParseTestError {
-    #[error("Failed to parse tests file: {0}")]
     Csv(#[from] csv::Error),
+    Io(#[from] io::Error),
 }
 
+#[derive(Debug, Clone)]
 pub enum ImportSource {
     Path(PathBuf),
     Url(Url),

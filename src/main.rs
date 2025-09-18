@@ -6,7 +6,7 @@ mod watch;
 
 use clap::{Args, Parser, Subcommand};
 use colored::Colorize;
-use import::{import_emtran, ImportError};
+use import::{import_emtran, import_zstenger, ImportError};
 use run::{parse_tests, run_tests, RunError, TestResult};
 use std::{
     env,
@@ -62,6 +62,7 @@ enum Subcommands {
     /// Import emtran's test (default source at https://github.com/vietdu91/42_minishell, thank you
     /// emtran !)
     ImportEmtran(ImportEmtran),
+    ImportZstenger(ImportEmtran),
 }
 
 #[derive(Clone, Default, Args)]
@@ -206,7 +207,7 @@ fn main() -> Result<(), Error> {
             run_test_files()?;
             if cli.watch {
                 watch::blocking(&cli, run_test_files)?;
-            } 
+            }
         }
         Subcommands::Tui(exec_paths) => {
             tui::run(exec_paths.clone()).unwrap();
@@ -215,6 +216,9 @@ fn main() -> Result<(), Error> {
             source,
             header_size,
         }) => import_emtran(&(&source).into(), header_size)?,
+        Subcommands::ImportZstenger(ImportEmtran { source, .. }) => {
+            import_zstenger(&(&source).into())?
+        }
     }
     Ok(())
 }

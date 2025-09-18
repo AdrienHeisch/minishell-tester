@@ -19,14 +19,12 @@ fn download_file(url: &(impl IntoUrl + Clone)) -> Result<Response, DownloadError
         path.push("export");
     }
     url.query_pairs_mut().append_pair("format", "csv");
-    println!("Downloading tests...");
     Ok(reqwest::blocking::get(url)?)
 }
 
 fn get_reader(source: &ImportSource) -> Result<Box<dyn io::Read>, ImportError> {
     Ok(match source {
         ImportSource::Path(path) => {
-            println!("Importing tests...");
             Box::new(fs::File::open(path).map_err(ImportError::ReadSource)?)
         }
         ImportSource::Url(url) => Box::new(download_file(url)?),
@@ -113,6 +111,7 @@ fn write_to_file(tests: &[Test], name: &str) -> Result<(), ImportError> {
 }
 
 pub fn import(source: &ImportSource, header_size: usize) -> Result<(), ImportError> {
+    println!("Importing tests...");
     let (mandatory, bonus, more) = parse(get_reader(source)?, header_size)?;
     write_to_file(&mandatory, "mandatory")?;
     write_to_file(&bonus, "bonus")?;

@@ -323,6 +323,7 @@ pub fn exec_test(
             return Ok(false);
         }
     }
+
     if bash.stdout != minishell.stdout {
         writeln!(output, "######## FAILED ########")?;
         writeln!(output, "Expected output:")?;
@@ -333,6 +334,20 @@ pub fn exec_test(
             writeln!(output, "Error:")?;
             output.write_all(&minishell.stderr)?;
         }
+        writeln!(output, "########################")?;
+        return Ok(false);
+    }
+
+    if cli.error_check && bash.stderr != minishell.stderr {
+        writeln!(output, "######## FAILED ########")?;
+        if !minishell.stdout.is_empty() {
+            writeln!(output, "Output:")?;
+            output.write_all(&minishell.stdout)?;
+        }
+        writeln!(output, "Expected error:")?;
+        output.write_all(&bash.stderr)?;
+        writeln!(output, "Tested error:")?;
+        output.write_all(&minishell.stderr)?;
         writeln!(output, "########################")?;
         return Ok(false);
     }
