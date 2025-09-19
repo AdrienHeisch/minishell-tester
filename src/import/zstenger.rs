@@ -1,7 +1,7 @@
-use super::{DownloadError, ImportError, ImportSource, ParseTestError};
+use super::{write_to_file, DownloadError, ImportError, ImportSource, ParseTestError};
 use crate::test::Test;
 use reqwest::{blocking::Response, IntoUrl};
-use std::{fs::OpenOptions, io};
+use std::io;
 
 const FILENAME_TEMPLATE: &str = "zstenger_{}.csv";
 const ORIGINAL_URL_BASE: &str =
@@ -92,28 +92,14 @@ fn parse(mut reader: impl io::Read) -> Result<Vec<Test>, ParseTestError> {
     Ok(tests)
 }
 
-fn write_to_file(tests: &[Test], name: &str) -> Result<(), ImportError> {
-    let file = OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .open(FILENAME_TEMPLATE.replace("{}", name))
-        .map_err(ImportError::WriteOutput)?;
-    let mut writer = csv::Writer::from_writer(file);
-    for test in tests {
-        writer.serialize(test)?;
-    }
-    Ok(())
-}
-
 pub fn import(source: &ImportSource) -> Result<(), ImportError> {
     println!("Importing tests...");
     for (route, files) in ROUTES.iter() {
         let mut tests = Vec::new();
         for file in files.iter() {
-            tests.append(&mut parse(get_reader(&source, route, file)?)?);
+            tests.append(&mut parse(get_reader(source, route, file)?)?);
         }
-        write_to_file(&tests, route)?;
+        write_to_file(&tests, FILENAME_TEMPLATE, route)?;
     }
     println!("Done !");
     Ok(())

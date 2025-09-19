@@ -1,10 +1,7 @@
-use super::{DownloadError, ImportError, ImportSource, ParseTestError};
+use super::{write_to_file, DownloadError, ImportError, ImportSource, ParseTestError};
 use crate::test::Test;
-use reqwest::{blocking::Response, IntoUrl, Url};
-use std::{
-    fs::{self, OpenOptions},
-    io,
-};
+use reqwest::{blocking::Response, IntoUrl};
+use std::{fs, io};
 
 const FILENAME_TEMPLATE: &str = "emtran_{}.csv";
 const ORIGINAL_URL: &str = "https://docs.google.com/spreadsheets/d/1uJHQu0VPsjjBkR4hxOeCMEt3AOM1Hp_SmUzPFhAH-nA/edit#gid=0";
@@ -28,7 +25,7 @@ fn get_reader(source: &ImportSource) -> Result<Box<dyn io::Read>, ImportError> {
             Box::new(fs::File::open(path).map_err(ImportError::ReadSource)?)
         }
         ImportSource::Url(url) => Box::new(download_file(url)?),
-        ImportSource::Default => Box::new(download_file(&Url::parse(ORIGINAL_URL)?)?),
+        ImportSource::Default => Box::new(download_file(&ORIGINAL_URL)?),
     })
 }
 
@@ -96,26 +93,12 @@ fn parse(reader: impl io::Read, header_size: usize) -> Result<Tests, ParseTestEr
     Ok((mandatory, bonus, more))
 }
 
-fn write_to_file(tests: &[Test], name: &str) -> Result<(), ImportError> {
-    let file = OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .open(FILENAME_TEMPLATE.replace("{}", name))
-        .map_err(ImportError::WriteOutput)?;
-    let mut writer = csv::Writer::from_writer(file);
-    for test in tests {
-        writer.serialize(test)?;
-    }
-    Ok(())
-}
-
 pub fn import(source: &ImportSource, header_size: usize) -> Result<(), ImportError> {
     println!("Importing tests...");
     let (mandatory, bonus, more) = parse(get_reader(source)?, header_size)?;
-    write_to_file(&mandatory, "mandatory")?;
-    write_to_file(&bonus, "bonus")?;
-    write_to_file(&more, "more")?;
+    write_to_file(&mandatory, FILENAME_TEMPLATE, "mandatory")?;
+    write_to_file(&bonus, FILENAME_TEMPLATE, "bonus")?;
+    write_to_file(&more, FILENAME_TEMPLATE, "more")?;
     println!("Done !");
     Ok(())
 }

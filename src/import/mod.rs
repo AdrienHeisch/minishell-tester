@@ -4,11 +4,11 @@ pub mod zstenger;
 pub use emtran::import as import_emtran;
 pub use zstenger::import as import_zstenger;
 
-use std::{io, path::PathBuf};
+use std::{fs::OpenOptions, io, path::PathBuf};
 use thiserror::Error;
 use url::Url;
 
-use crate::ImportSourceArgs;
+use crate::{test::Test, ImportSourceArgs};
 
 #[derive(Debug, Error)]
 #[error("{0}")]
@@ -63,4 +63,18 @@ impl From<&ImportSourceArgs> for ImportSource {
             _ => Self::Default,
         }
     }
+}
+
+fn write_to_file(tests: &[Test], template: &str, name: &str) -> Result<(), ImportError> {
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(template.replace("{}", name))
+        .map_err(ImportError::WriteOutput)?;
+    let mut writer = csv::Writer::from_writer(file);
+    for test in tests {
+        writer.serialize(test)?;
+    }
+    Ok(())
 }
