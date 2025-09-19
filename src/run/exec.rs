@@ -15,6 +15,8 @@ pub enum ExecError {
     Setup(#[from] SetupError),
     #[error("Error during test execution: {0}")]
     Io(#[from] io::Error),
+    #[error("Error from bwrap, probably missing executable")]
+    Bwrap,
 }
 
 #[derive(Debug, Error)]
@@ -36,8 +38,8 @@ fn setup_test(exec_path: &Path, is_bwrap: bool) -> Result<(), SetupError> {
     fs::create_dir(&exec_path)?;
     if is_bwrap {
         fs::create_dir(exec_path.join(".bin"))?;
-        exec_path = exec_path.join("root");
-        fs::create_dir(&exec_path)?;
+        exec_path = exec_path.join("home/maxitester");
+        fs::create_dir_all(&exec_path)?;
     }
     fs::File::create_new(exec_path.join("a"))?.write_all(b"file a\n")?;
     fs::File::create_new(exec_path.join("b"))?.write_all(b"file b\n")?;
@@ -95,9 +97,10 @@ fn exec(
             .args(["--dev", "/dev"])
             .args(["--ro-bind", "/usr", "/usr"])
             .args(["--ro-bind", "/bin", "/bin"])
+            .args(["--ro-bind", "/lib", "/lib"])
             .args(["--ro-bind", "/lib64", "/lib64"])
             .args(["--tmpfs", "/tmp"])
-            .args(["--chdir", "/root"])
+            .args(["--chdir", "/home/maxitester"])
             .arg("--unshare-all")
             .arg("--die-with-parent")
             .arg("--new-session");
@@ -248,8 +251,26 @@ pub fn exec_test(
     let bash = exec_bash(test, cli, base_path, exec_path)
         .inspect_err(|_| drop(writeln!(output, "# BASH FAILED TO RUN! ##")))?;
 
+    if cli.bwrap
+        && !bash.status.success()
+        && String::from_utf8_lossy(&bash.stderr).contains("bwrap: execvp")
+    {
+        writeln!(output, "## BASH FAILED TO RUN! ##")?;
+        output.write_all(&bash.stderr)?;
+        return Err(ExecError::Bwrap);
+    }
+
     let minishell = exec_minishell(test, cli, base_path, exec_path)
         .inspect_err(|_| drop(writeln!(output, "#### FAILED TO RUN! ####")))?;
+
+    if cli.bwrap
+        && !minishell.status.success()
+        && String::from_utf8_lossy(&minishell.stderr).contains("bwrap: execvp")
+    {
+        writeln!(output, "#### FAILED TO RUN! ####")?;
+        output.write_all(&minishell.stderr)?;
+        return Err(ExecError::Bwrap);
+    }
 
     if cli.valgrind {
         match minishell.status.code() {

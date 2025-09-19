@@ -3,8 +3,8 @@ mod parse;
 
 pub use parse::parse_tests;
 
-use crate::{show, test::Test};
 use crate::Run;
+use crate::{show, test::Test};
 use exec::{exec_test, ExecError};
 use parse::ParseTestError;
 use rayon::prelude::*;
@@ -74,7 +74,7 @@ pub fn run_tests(tests: &[Test], cli: &Run, do_show: bool) -> Result<Vec<TestRes
                 }
             }
             Err(err) => {
-                let err = format!("{output}\n{err}\n########################");
+                let err = format!("{output}{err}\n########################");
                 *res = TestResult::Error(err);
                 if do_show {
                     show(cli, res, |res| println!("{res}"));

@@ -19,7 +19,7 @@ if [ $1 == "run" ]; then
   ARGS="-m /bin/minishell"
 fi
 
-$CONTAINER image build -f Containerfile -t $NAME .
+$CONTAINER image build -f Containerfile -t $NAME . >/dev/null
 $CONTAINER run \
   --rm \
   --tty \
