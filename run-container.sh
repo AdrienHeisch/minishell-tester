@@ -22,8 +22,8 @@ fi
 $CONTAINER image build -f Containerfile -t $NAME .
 $CONTAINER run \
   --rm \
-  -w "/usr/src/$NAME" \
+  --tty \
   -v "$PWD":"/usr/src/$NAME" \
   -v "$PWD/$PROGRAM_PATH":"/bin/minishell" \
   $NAME \
-  cargo run --release -- $@ $ARGS
+  /bin/maxitest $@ $ARGS
