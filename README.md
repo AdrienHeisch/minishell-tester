@@ -10,6 +10,11 @@ cargo build --release && mv target/release/maxitest .
 If you're using a workstation at 42, the rust compiler and system libraries might be too outdated.
 Try to use the ```./run-container.sh``` script instead.
 
+## Tests
+
+This program contains two importers that will fetch about 1800 tests written by other students.
+Please leave an issue if you are one of these students and want me to remove one of the importers.
+
 ## Help
 
 Feature highlight: parallel execution, sandboxing, watch for recompilation
