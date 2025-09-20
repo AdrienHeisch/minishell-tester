@@ -73,9 +73,11 @@ fn do_run_tests(tests: &[PathBuf], run_options: &Run) -> Result<FullRunResults, 
     Ok(out)
 }
 
+type TestThreadReceiver = Receiver<Result<Vec<(PathBuf, usize, Vec<TestResult>)>, String>>;
+
 fn run_test_thread(
     state: &State,
-    running_rx: &mut Option<Receiver<Result<Vec<(PathBuf, usize, Vec<TestResult>)>, String>>>,
+    running_rx: &mut Option<TestThreadReceiver>,
 ) {
     let (tx, rx) = std::sync::mpsc::channel();
     let test_files = state.test_files.lock().unwrap().clone();

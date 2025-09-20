@@ -43,7 +43,7 @@ pub fn run_tests(tests: &[Test], cli: &Run, do_show: bool) -> Result<Vec<TestRes
         Err(err) => Err(RunError::ClearCurrentDir(err))?,
         Ok(()) => (),
     }
-    fs::create_dir(base_path.join(TMP_DIR)).map_err(RunError::CreateDir)?;
+    fs::create_dir(&tmp_path).map_err(RunError::CreateDir)?;
 
     let mut tests = tests
         .iter()

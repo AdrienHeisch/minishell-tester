@@ -85,9 +85,9 @@ fn parse(mut reader: impl io::Read) -> Result<Vec<Test>, ParseTestError> {
                 });
                 commands = vec![];
             }
-        } else {
-            commands.push(line);
+            continue;
         }
+        commands.push(line);
     }
     Ok(tests)
 }
