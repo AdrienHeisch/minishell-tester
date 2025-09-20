@@ -15,6 +15,8 @@ pub enum ExecError {
     Setup(#[from] SetupError),
     #[error("Error during test execution: {0}")]
     Io(#[from] io::Error),
+    #[error("Error during test subcommand execution: {0}")]
+    Command(io::Error),
     #[error("Error from bwrap, probably missing executable")]
     Bwrap,
 }
@@ -150,7 +152,7 @@ fn exec(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut child = command.spawn()?;
+    let mut child = command.spawn().map_err(ExecError::Command)?;
     let mut stdin = child.stdin.take().unwrap();
     for line in test.lines() {
         stdin.write_all(line.as_bytes())?;
