@@ -128,7 +128,8 @@ struct Run {
     /// Watch minishell executable file and run tests on change
     #[arg(short, long)]
     watch: bool,
-    /// Paths to tests csv files
+    /// Paths to tests csv files. Individual test results will be hidden if there are multiple
+    /// files, so *.csv with --keep-going is a good option for a full test
     #[arg(required = true)]
     tests: Vec<PathBuf>,
 }
@@ -195,12 +196,13 @@ fn main() -> Result<(), Error> {
             }
             let run_test_files = {
                 let cli = cli.clone();
+                let do_show = cli.tests.len() == 1;
                 move || {
                     cli.tests.iter().try_for_each(|file| {
                         println!();
                         println!("Running tests from {file:?}");
                         let (tests, ignored) = parse_tests(file, &cli)?;
-                        let results = run_tests(&tests, &cli, true)?;
+                        let results = run_tests(&tests, &cli, do_show)?;
                         println!("{}", recap(tests.len(), ignored, &results));
                         Ok(())
                     })
