@@ -1,7 +1,7 @@
 mod popup;
 
 use crate::{
-    extract_bwrap, recap,
+    recap,
     run::{parse_tests, run_tests, RunError, TestResult},
     show,
     test::Test,
@@ -38,10 +38,9 @@ fn find_test_files(path: &Path) -> io::Result<Vec<PathBuf>> {
 }
 
 pub fn run(mut exec_paths: ExecPaths) -> io::Result<()> {
-    let bwrap = exec_paths.bwrap_path.exists() || extract_bwrap(&mut exec_paths).is_ok();
     let run_options = Run {
         exec_paths,
-        bwrap,
+        bwrap: true,
         parallel: true,
         keep_going: true,
         ..Default::default()

@@ -20,12 +20,6 @@ use thiserror::Error;
 use url::Url;
 use watch::WatchError;
 
-const BWRAP_EXEC: Option<&[u8]> = if cfg!(feature = "include-bwrap") {
-    Some(include_bytes!("/usr/bin/bwrap"))
-} else {
-    None
-};
-
 #[derive(Parser)]
 /// MAXITEST FOR MINISHELL
 ///
@@ -170,24 +164,11 @@ impl Debug for Error {
     }
 }
 
-fn extract_bwrap(exec_paths: &mut ExecPaths) -> io::Result<()> {
-    if let Some(bwrap) = BWRAP_EXEC {
-        let path = env::temp_dir().join("maxitest-bwrap");
-        fs::write(&path, bwrap)?;
-        fs::set_permissions(&path, Permissions::from_mode(0o0744))?;
-        exec_paths.bwrap_path = path;
-    }
-    Ok(())
-}
-
 fn main() -> Result<(), Error> {
     let cli = Cli::parse();
     match cli.command {
         Subcommands::Example => todo!(),
-        Subcommands::Run(mut cli) => {
-            if cli.bwrap && !cli.exec_paths.bwrap_path.exists() {
-                extract_bwrap(&mut cli.exec_paths).map_err(Error::Bwrap)?;
-            }
+        Subcommands::Run(cli) => {
             if cli.parallel && !cli.bwrap {
                 panic!("--parallel needs --bwrap !");
             }
