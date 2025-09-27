@@ -2,11 +2,17 @@
 
 ## Installation 
 
-With a rust toolchain installed, clone this repository into a subdirectory in your minishell project and run
+### Cargo
 ```
 cargo build --release && mv target/release/maxitest .
 ```
 
+### Nix
+```
+nix build && mv result/bin/maxitest .
+```
+
+### Container
 If you're using a workstation at 42, the rust compiler and system libraries might be too outdated.
 Try to use the ```./run-container.sh``` script instead.
 
