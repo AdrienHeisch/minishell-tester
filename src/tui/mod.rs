@@ -37,7 +37,7 @@ fn find_test_files(path: &Path) -> io::Result<Vec<PathBuf>> {
         .collect())
 }
 
-pub fn run(mut exec_paths: ExecPaths) -> io::Result<()> {
+pub fn run(exec_paths: ExecPaths) -> io::Result<()> {
     let run_options = Run {
         exec_paths,
         bwrap: true,

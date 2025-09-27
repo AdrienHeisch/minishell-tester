@@ -9,11 +9,7 @@ use colored::Colorize;
 use import::{import_emtran, import_zstenger, ImportError};
 use run::{parse_tests, run_tests, RunError, TestResult};
 use std::{
-    env,
     fmt::Debug,
-    fs::{self, Permissions},
-    io,
-    os::unix::fs::PermissionsExt,
     path::PathBuf,
 };
 use thiserror::Error;
@@ -154,8 +150,6 @@ enum Error {
     Run(#[from] RunError),
     Import(#[from] ImportError),
     Watch(#[from] WatchError),
-    #[error("Failed to extract bwrap executable: {0}")]
-    Bwrap(io::Error),
 }
 
 impl Debug for Error {
