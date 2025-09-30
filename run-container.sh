@@ -23,6 +23,7 @@ $CONTAINER image build -f Containerfile -t $NAME . >/dev/null
 $CONTAINER run \
   --rm \
   --tty \
+  --privileged \
   --pids-limit 4096 \
   -v "$PWD":"/usr/src/$NAME" \
   -v "$PWD/$PROGRAM_PATH":"/bin/minishell" \
