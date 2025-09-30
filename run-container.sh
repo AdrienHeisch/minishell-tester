@@ -15,7 +15,7 @@ else
   exit 1
 fi
 
-if [ $1 == "run" ]; then
+if [[ $1 == "run" ]]; then
   ARGS="-m /bin/minishell"
 fi
 
